@@ -13,6 +13,7 @@ export const DEFAULT_BROWSER_CONFIG: ResolvedBrowserConfig = {
   hideWindow: false,
   desiredModel: DEFAULT_MODEL_TARGET,
   debug: false,
+  allowCookieErrors: false,
 };
 
 export function resolveBrowserConfig(config: BrowserAutomationConfig | undefined): ResolvedBrowserConfig {
@@ -30,5 +31,6 @@ export function resolveBrowserConfig(config: BrowserAutomationConfig | undefined
     chromeProfile: config?.chromeProfile ?? DEFAULT_BROWSER_CONFIG.chromeProfile,
     chromePath: config?.chromePath ?? DEFAULT_BROWSER_CONFIG.chromePath,
     debug: config?.debug ?? DEFAULT_BROWSER_CONFIG.debug,
+    allowCookieErrors: config?.allowCookieErrors ?? DEFAULT_BROWSER_CONFIG.allowCookieErrors,
   };
 }

@@ -16,6 +16,7 @@ describe('buildBrowserConfig', () => {
       hideWindow: undefined,
       desiredModel: 'GPT-5 Pro',
       debug: undefined,
+      allowCookieErrors: undefined,
     });
   });
 
@@ -31,6 +32,7 @@ describe('buildBrowserConfig', () => {
       browserHeadless: true,
       browserHideWindow: true,
       browserKeepBrowser: true,
+      browserAllowCookieErrors: true,
       verbose: true,
     });
     expect(config).toMatchObject({
@@ -45,6 +47,7 @@ describe('buildBrowserConfig', () => {
       keepBrowser: true,
       desiredModel: 'ChatGPT 5.1',
       debug: true,
+      allowCookieErrors: true,
     });
   });
 

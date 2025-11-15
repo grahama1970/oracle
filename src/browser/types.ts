@@ -38,6 +38,7 @@ export interface BrowserAutomationConfig {
   hideWindow?: boolean;
   desiredModel?: string | null;
   debug?: boolean;
+  allowCookieErrors?: boolean;
 }
 
 export interface BrowserRunOptions {

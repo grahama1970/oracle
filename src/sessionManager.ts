@@ -19,6 +19,7 @@ export interface BrowserSessionConfig {
   hideWindow?: boolean;
   desiredModel?: string | null;
   debug?: boolean;
+  allowCookieErrors?: boolean;
 }
 
 export interface BrowserRuntimeMetadata {

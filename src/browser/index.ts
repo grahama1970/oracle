@@ -67,7 +67,13 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
     await Network.clearBrowserCookies();
 
     if (config.cookieSync) {
-      const cookieCount = await syncCookies(Network, config.url, config.chromeProfile, logger);
+      const cookieCount = await syncCookies(
+        Network,
+        config.url,
+        config.chromeProfile,
+        logger,
+        config.allowCookieErrors ?? false,
+      );
       logger(
         cookieCount > 0
           ? `Copied ${cookieCount} cookies from Chrome profile ${config.chromeProfile ?? 'Default'}`

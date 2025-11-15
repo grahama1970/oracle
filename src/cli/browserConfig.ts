@@ -22,6 +22,7 @@ export interface BrowserFlagOptions {
   browserHideWindow?: boolean;
   browserKeepBrowser?: boolean;
   browserModelLabel?: string;
+  browserAllowCookieErrors?: boolean;
   model: ModelName;
   verbose?: boolean;
 }
@@ -45,6 +46,7 @@ export function buildBrowserConfig(options: BrowserFlagOptions): BrowserSessionC
     hideWindow: options.browserHideWindow ? true : undefined,
     desiredModel: shouldUseOverride ? desiredModelOverride : mapModelToBrowserLabel(options.model),
     debug: options.verbose ? true : undefined,
+    allowCookieErrors: options.browserAllowCookieErrors ? true : undefined,
   };
 }
 

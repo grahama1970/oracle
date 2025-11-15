@@ -63,6 +63,7 @@ interface CliOptions extends OptionValues {
   browserHeadless?: boolean;
   browserHideWindow?: boolean;
   browserKeepBrowser?: boolean;
+  browserAllowCookieErrors?: boolean;
   verbose?: boolean;
   debugHelp?: boolean;
 }
@@ -125,6 +126,9 @@ program
   .addOption(new Option('--browser-headless', 'Launch Chrome in headless mode.').hideHelp())
   .addOption(new Option('--browser-hide-window', 'Hide the Chrome window after launch (macOS headful only).').hideHelp())
   .addOption(new Option('--browser-keep-browser', 'Keep Chrome running after completion.').hideHelp())
+  .addOption(
+    new Option('--browser-allow-cookie-errors', 'Continue even if Chrome cookies cannot be copied.').hideHelp(),
+  )
   .option('--debug-help', 'Show the advanced/debug option set and exit.', false)
   .showHelpAfterError('(use --help for usage)');
 
@@ -300,7 +304,13 @@ async function runRootCommand(options: CliOptions): Promise<void> {
 
   const sessionMode: SessionMode = engine === 'browser' ? 'browser' : 'api';
   const browserConfig =
-    sessionMode === 'browser' ? buildBrowserConfig({ ...options, model: resolvedModel, browserModelLabel: cliModelArg }) : undefined;
+    sessionMode === 'browser'
+      ? buildBrowserConfig({
+          ...options,
+          model: resolvedModel,
+          browserModelLabel: cliModelArg,
+        })
+      : undefined;
 
   await ensureSessionStorage();
   const baseRunOptions = buildRunOptions(resolvedOptions, { preview: false, previewMode: undefined });

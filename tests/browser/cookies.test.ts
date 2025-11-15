@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import { syncCookies } from '../../src/browser/cookies.js';
+import { syncCookies, ChromeCookieSyncError } from '../../src/browser/cookies.js';
 import type { ChromeClient } from '../../src/browser/types.js';
 
 const getCookiesPromised = vi.fn();
@@ -29,14 +29,23 @@ describe('syncCookies', () => {
     expect(setCookie).toHaveBeenCalledTimes(2);
   });
 
-  test('swallows failures and returns zero', async () => {
+  test('throws when cookie load fails', async () => {
+    getCookiesPromised.mockRejectedValue(new Error('boom'));
+    await expect(
+      syncCookies({ setCookie: vi.fn() } as unknown as ChromeClient['Network'], 'https://chatgpt.com', null, logger),
+    ).rejects.toBeInstanceOf(ChromeCookieSyncError);
+  });
+
+  test('can opt into continuing on cookie failures', async () => {
     getCookiesPromised.mockRejectedValue(new Error('boom'));
     const applied = await syncCookies(
       { setCookie: vi.fn() } as unknown as ChromeClient['Network'],
       'https://chatgpt.com',
       null,
       logger,
+      true,
     );
     expect(applied).toBe(0);
+    expect(logger).toHaveBeenCalledWith(expect.stringContaining('Cookie sync failed (continuing with override)'));
   });
 });

@@ -256,6 +256,11 @@ function buildModelMatchersLiteral(targetModel: string): { labelTokens: string[]
   push(`chatgpt ${dotless}`, labelTokens);
   push(`gpt ${base}`, labelTokens);
   push(`gpt ${dotless}`, labelTokens);
+  base
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter(Boolean)
+    .forEach((token) => push(token, labelTokens));
 
   const hyphenated = base.replace(/\s+/g, '-');
   push(hyphenated, testIdTokens);
