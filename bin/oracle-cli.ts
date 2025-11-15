@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { Command, Option } from 'commander';
 import type { OptionValues } from 'commander';
 import { resolveEngine, type EngineMode } from '../src/cli/engine.js';
+import { shouldRequirePrompt } from '../src/cli/promptRequirement.js';
 import chalk from 'chalk';
 import {
   ensureSessionStorage,
@@ -95,9 +96,7 @@ program.hook('preAction', (thisCommand) => {
     return;
   }
   const opts = thisCommand.optsWithGlobals() as CliOptions;
-  const bypassPrompt = Boolean(opts.session || opts.execSession || opts.status || opts.debugHelp);
-  const requiresPrompt = opts.renderMarkdown || Boolean(opts.preview) || Boolean(opts.dryRun) || !bypassPrompt;
-  if (requiresPrompt && !opts.prompt) {
+  if (shouldRequirePrompt(rawCliArgs, opts)) {
     throw new Error('Prompt is required. Provide it via --prompt "<text>".');
   }
 });
