@@ -44,7 +44,7 @@ export async function showStatus({ hours, includeAll, limit, showExamples = fals
   for (const entry of entries) {
     const statusRaw = (entry.status || 'unknown').padEnd(9);
     const status = richTty ? colorStatus(entry.status ?? 'unknown', statusRaw) : statusRaw;
-    const model = (entry.model || 'n/a').padEnd(10);
+    const model = (entry.model || 'n/a').padEnd(9);
     const created = entry.createdAt.replace('T', ' ').replace('Z', '');
     console.log(`${created} | ${status} | ${model} | ${entry.id}`);
   }
