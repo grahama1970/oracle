@@ -17,6 +17,11 @@
     "test:coverage": "vitest run --coverage",
     "prepare": "pnpm run build"
   },
+  "files": [
+    "dist/**/*",
+    "README.md",
+    "LICENSE"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/steipete/oracle.git"

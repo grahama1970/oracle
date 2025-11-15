@@ -69,7 +69,7 @@ function renderHelpFooter(program: Command, colors: HelpColors): string {
     `${colors.bullet('•')} Attach source files for best results, but keep total input under ~196k tokens.`,
     `${colors.bullet('•')} The model has no built-in knowledge of your project—open with the architecture, key components, and why you’re asking.`,
     `${colors.bullet('•')} Run ${colors.accent('--files-report')} to inspect token spend before hitting the API.`,
-    `${colors.bullet('•')} Non-preview runs spawn detached sessions so they keep streaming even if your terminal closes.`,
+    `${colors.bullet('•')} Non-preview runs spawn detached sessions so they keep streaming even if your terminal closes — reattach anytime via ${colors.accent('pnpm oracle session <slug>')}.`,
     `${colors.bullet('•')} Ask the model for a memorable 3–5 word slug and pass it via ${colors.accent('--slug "<words>"')} to keep session IDs tidy.`,
     `${colors.bullet('•')} Need hidden flags? Run ${colors.accent(`${program.name()} --help --verbose`)} to list search/token/browser overrides.`,
   ].join('\n');

@@ -443,7 +443,7 @@ async function pollBackgroundResponse(params: BackgroundPollParams): Promise<Ora
     if (status === 'completed') {
       return response;
     }
-    if (status !== 'in_progress') {
+    if (status !== 'in_progress' && status !== 'queued') {
       const detail = response.error?.message || response.incomplete_details?.reason || status;
       throw new OracleResponseError(`Response did not complete: ${detail}`, response);
     }
