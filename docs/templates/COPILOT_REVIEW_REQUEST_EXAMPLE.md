@@ -1,3 +1,19 @@
+<!--
+  TEMPLATE NOTE
+  -------------
+  This file is an example Copilot review request that you can adapt for any
+  repository. Before sending it, update:
+    - Repo / branch
+    - Paths of interest
+    - Summary / Objectives / Test plan
+
+  The intended pattern is:
+    1. Copilot validates the current approach and design.
+    2. Copilot answers the clarifying questions inline.
+    3. Copilot proposes any changes as one or more unified diffs
+       inside fenced ```diff blocks that satisfy the constraints below.
+-->
+
 # Fix Step 06 progress logging and sanitize HTML before Readability to prevent hangs
 
 ## Repository and branch
@@ -15,6 +31,12 @@ Step 06 intermittently "hangs" near completion because:
 
 1. Progress logs in `06_fetch_urls.py` are printed with literal format tokens (`%d`/`%s`), so operators can't see actual progress.
 2. Readability is fed raw HTML that can contain NULL bytes (`\x00`), leading to `ValueError: All strings must be XML compatible` and preventing the JSON summary/audit from being emitted.
+
+Copilot’s job is to:
+
+- Validate this proposed approach (objectives, constraints, test plan).
+- Answer the clarifying questions below.
+- Then provide any improvements as unified diff patches that respect the constraints.
 
 ## Objectives
 
@@ -97,4 +119,6 @@ In `fetcher/workflows/paywall_detector.py`:
 
 ## Deliverable
 
-Reply with a single fenced code block containing only a unified diff that meets the constraints above.
+Reply with 
+- a single fenced code block containing a unified diff that meets the constraints above (you may include multiple file hunks inside the same patch), and
+- answers to the clarifying questions above, written outside of the diff block so they are easy to read separately.

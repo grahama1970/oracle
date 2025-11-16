@@ -77,7 +77,7 @@ export interface SecretMatch {
 
 const SECRET_PATTERNS: Array<{ label: string; regex: RegExp }> = [
   { label: 'aws_access_key', regex: /AKIA[0-9A-Z]{16}/g },
-  { label: 'bearer_token', regex: /Bearer [A-Za-z0-9_\-]{20,}/g },
+  { label: 'bearer_token', regex: /Bearer [A-Za-z0-9_\-]{20,}/gi },
   {
     label: 'private_key_header',
     regex: /-----BEGIN (?:RSA|EC|OPENSSH|PRIVATE KEY)/g,
@@ -85,6 +85,21 @@ const SECRET_PATTERNS: Array<{ label: string; regex: RegExp }> = [
   {
     label: 'generic_api_key',
     regex: /\b(API_KEY|SECRET_KEY|ACCESS_TOKEN)\b\s*[:=]\s*["']?[A-Za-z0-9_\-]{8,}["']?/g,
+  },
+  // Common provider-specific patterns (best-effort heuristics)
+  { label: 'github_token', regex: /(ghp|ghu|ghs|ghr)_[A-Za-z0-9]{36}/g },
+  { label: 'github_pat', regex: /github_pat_[A-Za-z0-9_]{80,90}/g },
+  { label: 'google_api_key', regex: /AIza[0-9A-Za-z\-_]{35}/g },
+  {
+    label: 'slack_token',
+    regex: /xox[baps]-[0-9A-Za-z-]{10,48}-[0-9A-Za-z-]{10,48}-[0-9A-Za-z-]{10,48}/g,
+  },
+  { label: 'stripe_secret_key', regex: /sk_live_[0-9A-Za-z]{24}/g },
+  { label: 'stripe_publishable_key', regex: /pk_live_[0-9A-Za-z]{24}/g },
+  { label: 'openai_api_key', regex: /sk-[A-Za-z0-9]{32,48}/g },
+  {
+    label: 'jwt_token',
+    regex: /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
   },
 ];
 

@@ -39,7 +39,15 @@ export function getCurrentBranch(repoRoot: string): GitResult {
 }
 
 export function commitAll(message: string, repoRoot: string): GitResult {
-  return runGit(['commit', '-am', message], { cwd: repoRoot });
+  const addResult = runGit(['add', '-A'], { cwd: repoRoot });
+  if (!addResult.ok) {
+    return {
+      ok: false,
+      stderr: addResult.stderr,
+      stdout: addResult.stdout,
+    };
+  }
+  return runGit(['commit', '-m', message], { cwd: repoRoot });
 }
 
 export function getHeadSha(repoRoot: string): GitResult {
@@ -75,4 +83,3 @@ export function validateDiffPaths(diffText: string, restrictPrefix: string): boo
   }
   return true;
 }
-

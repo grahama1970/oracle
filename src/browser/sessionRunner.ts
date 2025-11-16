@@ -170,6 +170,11 @@ export async function runBrowserSessionExecution(
   let finalCommitSha: string | undefined;
   let finalPatchBytes = 0;
   let responseChars = 0;
+  let gitApplyError: string | undefined;
+  let gitCommitError: string | undefined;
+  let diffScore: number | undefined;
+  let diffBlocks: number | undefined;
+  let diffReason: string | undefined;
   let lastBrowserResult: BrowserRunResult | null = null;
   const startedAt = Date.now();
 
@@ -215,6 +220,9 @@ export async function runBrowserSessionExecution(
     responseChars = (browserResult.answerMarkdown || browserResult.answerText || '').length;
     const diffSource = browserResult.answerMarkdown || browserResult.answerText || '';
     const extraction = extractUnifiedDiff(diffSource);
+    diffScore = extraction.score;
+    diffBlocks = extraction.rawBlocks.length;
+    diffReason = extraction.reason;
     const diffText = extraction.selectedBlock;
     const diffFound = Boolean(diffText);
     const strict = Boolean(runOptions.strictDiff);
@@ -236,17 +244,20 @@ export async function runBrowserSessionExecution(
           const validation = validatePatch(diffOutputPath, gitRoot);
           if (!validation.ok) {
             finalStatus = 'apply_failed';
+            gitApplyError = validation.stderr;
           } else if (applyMode === 'check') {
             // no-op; validation already done
           } else {
             const applied = applyPatch(diffOutputPath, gitRoot);
             if (!applied.ok) {
               finalStatus = 'apply_failed';
+              gitApplyError = applied.stderr;
             } else if (applyMode === 'commit') {
               const commitMessage = runOptions.commitMessage ?? 'oracle: apply assistant patch';
               const committed = commitAll(commitMessage, gitRoot);
               if (!committed.ok) {
                 finalStatus = 'commit_failed';
+                gitCommitError = committed.stderr;
               } else {
                 const head = getHeadSha(gitRoot);
                 if (head.ok && head.stdout) {
@@ -293,7 +304,7 @@ export async function runBrowserSessionExecution(
     status: finalStatus,
     diffFound: Boolean(finalDiffPath),
     diffValidated: finalStatus === 'success' || finalStatus === 'apply_failed' || finalStatus === 'commit_failed',
-    diffApplied: finalStatus === 'success' || finalStatus === 'commit_failed',
+    diffApplied: finalStatus === 'success',
     applyMode,
     branch: runOptions.branch,
     commitSha: finalCommitSha,
@@ -305,6 +316,11 @@ export async function runBrowserSessionExecution(
     diffPath: finalDiffPath,
     secretScan: secretSummary,
     snapshots: lastBrowserResult?.snapshots ?? [],
+    diffScore,
+    diffBlocks,
+    diffReason,
+    gitApplyError,
+    gitCommitError,
   };
   await writeJsonOutput(jsonOutputPath, resultPayload);
   await writeJsonOutput(metricsOutputPath, {
@@ -332,5 +348,12 @@ export async function runBrowserSessionExecution(
     responseChars,
     secretScan: secretSummary,
     snapshots: lastBrowserResult?.snapshots ?? [],
+    // auxiliary diagnostics (not yet persisted into SessionMetadata)
+    // to help downstream tooling when needed
+    // diffScore,
+    // diffBlocks,
+    // diffReason,
+    // gitApplyError,
+    // gitCommitError,
   };
 }

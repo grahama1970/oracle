@@ -7,7 +7,7 @@ export interface DiffExtractionResult {
   reason?: string;
 }
 
-const FENCE_RE = /```[\w-]*\n([\s\S]*?)```/g;
+const FENCE_RE = /```[^\n]*\n([\s\S]*?)```/g;
 const HUNK_RE = /@@ -\d+,\d+ \+\d+,\d+ @@/;
 const DIFF_HEADER_RE = /^diff --git /m;
 
@@ -49,13 +49,40 @@ export function isValidUnifiedDiff(diff: string | undefined, strict = false): bo
   if (!HUNK_RE.test(diff)) return false;
   if (strict) {
     const lines = diff.split('\n');
-    const badHunk = lines.some((line) => {
-      if (!line.startsWith('@@')) {
-        return false;
+    let sawFileHeader = false;
+    let sawUnsafePath = false;
+    const fileHeaderRe = /^diff --git a\/(.+?) b\/(.+)$/;
+    for (const line of lines) {
+      if (line.startsWith('diff --git ')) {
+        const match = fileHeaderRe.exec(line);
+        if (!match) {
+          return false;
+        }
+        const [, aPath, bPath] = match;
+        const paths = [aPath, bPath];
+        for (const p of paths) {
+          const normalized = p.replace(/\\/g, '/');
+          if (
+            normalized.startsWith('/') ||
+            normalized.startsWith('../') ||
+            normalized.includes('/../') ||
+            /^[a-zA-Z]:\//.test(normalized)
+          ) {
+            sawUnsafePath = true;
+            break;
+          }
+        }
       }
-      return !/^@@ -\d+(,\d+)? \+\d+(,\d+)? @@/.test(line);
-    });
-    if (badHunk) {
+      if (line.startsWith('--- a/') || line.startsWith('+++ b/')) {
+        sawFileHeader = true;
+      }
+      if (line.startsWith('@@')) {
+        if (!/^@@ -\d+(,\d+)? \+\d+(,\d+)? @@/.test(line)) {
+          return false;
+        }
+      }
+    }
+    if (!sawFileHeader || sawUnsafePath) {
       return false;
     }
   }
@@ -70,4 +97,3 @@ export function ensureValidDiff(diff: string | undefined, strict = false): strin
   }
   return diff as string;
 }
-
