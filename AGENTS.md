@@ -13,6 +13,7 @@ Shared guardrails distilled from the various `~/Projects/*/AGENTS.md` files (sta
 ### Intake & Scoping
 - Open the local agent instructions plus any `docs:list` summaries at the start of every session. Re-run those helpers whenever you suspect the docs may have changed.
 - Review any referenced tmux panes, CI logs, or failing command transcripts so you understand the most recent context before writing code.
+- For complex new flows (e.g., integrating with a new UI like Copilot Web), start with a **minimal proof-of-concept vertical slice** that demonstrates one end-to-end run before investing in broad refactors or safety hardening.
 
 ### Tooling & Command Wrappers
 - Use the command wrappers provided by the workspace (`./runner …`, `scripts/committer`, `pnpm mcp:*`, etc.). Skip them only for trivial read-only shell commands if that’s explicitly allowed.
@@ -35,6 +36,7 @@ Shared guardrails distilled from the various `~/Projects/*/AGENTS.md` files (sta
 - Favor strict typing: avoid `any`, untyped dictionaries, or generic type erasure unless absolutely required. Prefer concrete structs/enums and mark public concurrency surfaces appropriately.
 - Keep files at a manageable size. When a file grows unwieldy, extract helpers or new modules instead of letting it bloat.
 - Match the repo’s established style (commit conventions, formatting tools, component patterns, etc.) by studying existing code before introducing new patterns.
+- When a fork has a **single primary goal** (e.g., “remove copy/paste to Copilot Web”), prioritize implementing a small, working vertical slice for that goal before making general-purpose architectural improvements.
 
 ### Git, Commits & Releases
 - Invoke git through the provided wrappers, especially for status, diffs, and commits. Only commit or push when the user asks you to do so.
