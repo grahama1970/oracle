@@ -1,0 +1,75 @@
+Starting Copilot POC run with prompt (33 chars)...
+[browser-mode] config: {"chromeProfile":"Default","chromePath":"/usr/bin/google-chrome","url":"https://github.com/copilot/","timeoutMs":900000,"inputTimeoutMs":30000,"cookieSync":true,"headless":true,"keepBrowser":false,"hideWindow":false,"desiredModel":null,"debug":true,"allowCookieErrors":true,"promptLength":33}
+Created temporary Chrome profile at /tmp/oracle-browser-8JwGcn
+Launched Chrome (pid 3359380) on port 41139
+Connected to Chrome DevTools protocol
+Failed to set cookie color_mode: Sanitizing cookie failed
+Failed to set cookie _gh_sess: Sanitizing cookie failed
+Failed to set cookie __Host-next-auth.csrf-token: Sanitizing cookie failed
+Failed to set cookie oai-did: Sanitizing cookie failed
+Failed to set cookie cf_clearance: Sanitizing cookie failed
+Failed to set cookie oai-client-auth-info: Sanitizing cookie failed
+Failed to set cookie oai-hm: Sanitizing cookie failed
+Failed to set cookie oai-sc: Sanitizing cookie failed
+Failed to set cookie _cfuvid: Sanitizing cookie failed
+Failed to set cookie __Secure-next-auth.session-token: Sanitizing cookie failed
+Failed to set cookie __cf_bm: Sanitizing cookie failed
+Failed to set cookie _dd_s: Sanitizing cookie failed
+Failed to set cookie _gcl_au: Sanitizing cookie failed
+Failed to set cookie cf_clearance: Sanitizing cookie failed
+Copied 27 cookies from Chrome profile Default
+Navigating to https://github.com/copilot/
+Prompt textarea ready
+Prompt textarea ready (initial focus, 33 chars queued)
+Submitted prompt via Enter key
+Waiting for Copilot response (simplified snapshot mode)
+[retry] Markdown capture attempt 2: copy-missing
+[retry] Markdown capture attempt 3: copy-missing
+Cleanup complete • 4.1s total
+--- Copilot POC Result ---
+Answer text length: 792
+Answer markdown length: 792
+
+Answer (markdown or text):
+Copilot
+Sign in
+Sign up
+The AI assistant that builds with you
+
+Generate code, manage tasks, and explore your projects all in one place with GitHub Copilot
+
+GPT-4.1
+Explore the latest Copilot launches from Universe ’25
+See what’s new
+Try Copilot on your favorite platform
+VS Code
+VS Code
+Visual Studio
+Visual Studio
+Xcode
+Xcode
+JetBrains
+IDEs
+JetBrains IDEs
+Neovim
+Neovim
+Azure
+Data Studio
+Azure Data Studio
+Eclipse
+Eclipse
+Raycast
+Raycast
+Copilot uses AI. Check for mistakes.
+(/*!]%#//][?/?*/!]#*+([+?*/-)
+Copilot CLI updates
+Manage agents and their sessions
+Copilot Code review updates
+Copilot integrations
+Plan mode in VS Code
+See all announcements
+Try with Copilot Pro for free
+Sign in to continue
+Sign in or create a GitHub account to continue using Copilot.
+Sign in
+Create a free account

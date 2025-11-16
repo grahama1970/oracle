@@ -16,9 +16,16 @@ import {
   uploadAttachmentFile,
   waitForAttachmentCompletion,
   readAssistantSnapshot,
+  // Copilot-specific imports
+  detectTarget,
+  navigateToCopilot,
+  checkCopilotAuthentication,
+  ensureCopilotPromptReady,
+  waitForCopilotResponse,
 } from './pageActions.js';
 import { estimateTokenCount, withRetries } from './utils.js';
 import { formatElapsed } from '../oracle/format.js';
+import { integrateCopilotLogic } from './copilotIntegration.js';
 
 export type { BrowserAutomationConfig, BrowserRunOptions, BrowserRunResult } from './types.js';
 export { CHATGPT_URL, DEFAULT_MODEL_TARGET } from './constants.js';
@@ -107,25 +114,56 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
       logger('Skipping Chrome cookie sync (--browser-no-cookie-sync)');
     }
 
-    await navigateToChatGPT(Page, Runtime, config.url, logger);
-    await ensureNotBlocked(Runtime, config.headless, logger);
-    await ensurePromptReady(Runtime, config.inputTimeoutMs, logger);
-    logger(`Prompt textarea ready (initial focus, ${promptText.length.toLocaleString()} chars queued)`);
-    if (config.desiredModel) {
-      await withRetries(
-        () => ensureModelSelection(Runtime, config.desiredModel as string, logger),
-        {
-          retries: 2,
-          delayMs: 300,
-          onRetry: (attempt, error) => {
-            if (options.verbose) {
-              logger(`[retry] Model picker attempt ${attempt + 1}: ${error instanceof Error ? error.message : error}`);
-            }
-          },
-        },
-      );
+    // Detect target platform
+    const target = detectTarget(config.url);
+    logger(`Detected target platform: ${target}`);
+
+    if (target === 'copilot') {
+      // Copilot-specific flow
+      logger('Using Copilot-specific flow...');
+      await navigateToCopilot(Page, Runtime, logger);
+      await ensureNotBlocked(Runtime, config.headless, logger);
+
+      // Check authentication without blocking
+      const isAuthenticated = await checkCopilotAuthentication(Runtime, logger);
+      if (!isAuthenticated && !config.headless) {
+        logger('⚠️  GitHub Copilot authentication required');
+        logger('Please authenticate manually in the browser window');
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      }
+
+      // Ensure Copilot input is ready
+      const inputElement = await ensureCopilotPromptReady(Runtime, config.inputTimeoutMs, logger);
+      if (!inputElement) {
+        throw new Error('Could not find Copilot input element');
+      }
+      logger(`Copilot input ready '${inputElement}' (${promptText.length.toLocaleString()} chars queued)`);
+
+      // Skip model selection for Copilot (no model picker like ChatGPT)
+      logger('Skipping model selection for Copilot');
+    } else {
+      // ChatGPT flow (existing logic)
+      await navigateToChatGPT(Page, Runtime, config.url, logger);
+      await ensureNotBlocked(Runtime, config.headless, logger);
       await ensurePromptReady(Runtime, config.inputTimeoutMs, logger);
-      logger(`Prompt textarea ready (after model switch, ${promptText.length.toLocaleString()} chars queued)`);
+      logger(`Prompt textarea ready (initial focus, ${promptText.length.toLocaleString()} chars queued)`);
+
+      if (config.desiredModel) {
+        await withRetries(
+          () => ensureModelSelection(Runtime, config.desiredModel as string, logger),
+          {
+            retries: 2,
+            delayMs: 300,
+            onRetry: (attempt, error) => {
+              if (options.verbose) {
+                logger(`[retry] Model picker attempt ${attempt + 1}: ${error instanceof Error ? error.message : error}`);
+              }
+            },
+          },
+        );
+        await ensurePromptReady(Runtime, config.inputTimeoutMs, logger);
+        logger(`Prompt textarea ready (after model switch, ${promptText.length.toLocaleString()} chars queued)`);
+      }
     }
     if (attachments.length > 0) {
       if (!DOM) {
@@ -150,9 +188,17 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
         snapshotPaths,
       );
     }
-    const answer = await waitForAssistantResponse(Runtime, config.timeoutMs, logger);
+    // Platform-specific response waiting
+    let answer;
+    if (target === 'copilot') {
+      answer = await waitForCopilotResponse(Runtime, config.timeoutMs, logger);
+    } else {
+      answer = await waitForAssistantResponse(Runtime, config.timeoutMs, logger);
+    }
+
     answerText = answer.text;
     answerHtml = answer.html ?? '';
+
     const copiedMarkdown = await withRetries(
       async () => {
         const attempt = await captureAssistantMarkdown(Runtime, answer.meta, logger);
@@ -163,12 +209,12 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
       },
       {
         retries: 2,
-        delayMs: 350,
+  delayMs: 350,
         onRetry: (attempt, error) => {
-          if (options.verbose) {
-            logger(
-              `[retry] Markdown capture attempt ${attempt + 1}: ${error instanceof Error ? error.message : error}`,
-            );
+if (options.verbose) {
+logger(
+           `[retry] Markdown capture attempt ${attempt + 1}: ${error instanceof Error ? error.message : error}`,
+     );
           }
         },
       },
@@ -191,6 +237,7 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
       chromePort: chrome.port,
       userDataDir,
       snapshots: snapshotPaths.length > 0 ? snapshotPaths : undefined,
+      platform: target, // Add platform info to help debugging
     };
   } catch (error) {
     const normalizedError = error instanceof Error ? error : new Error(String(error));
@@ -253,6 +300,15 @@ export {
   captureAssistantMarkdown,
   uploadAttachmentFile,
   waitForAttachmentCompletion,
+} from './pageActions.js';
+
+// Copilot-specific exports for external use
+export {
+  detectTarget,
+  navigateToCopilot,
+  checkCopilotAuthentication,
+  ensureCopilotPromptReady,
+  waitForCopilotResponse,
 } from './pageActions.js';
 
 function isWebSocketClosureError(error: Error): boolean {
