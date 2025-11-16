@@ -71,7 +71,7 @@ export function validateDiffPaths(diffText: string, restrictPrefix: string): boo
     if (!line.startsWith('diff --git ')) {
       continue;
     }
-    const parts = line.split(' ');
+    const parts = line.trim().split(/\s+/);
     const aPath = parts[2]?.replace(/^a\//, '') ?? '';
     const bPath = parts[3]?.replace(/^b\//, '') ?? '';
     if (

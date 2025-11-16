@@ -67,7 +67,8 @@ export async function performSessionRun({
         diffFound: Boolean(result.diffPath),
         diffValidated:
           result.status === 'success' || result.status === 'apply_failed' || result.status === 'commit_failed',
-        diffApplied: result.status === 'success' || result.status === 'commit_failed',
+        // Contract: commit_failed must not be treated as fully applied
+        diffApplied: result.status === 'success',
         applyMode: runOptions.applyMode,
         branch: runOptions.branch,
         commitSha: result.commitSha,
