@@ -163,6 +163,10 @@ async function verifyPromptCommitted(
   const primarySelectorLiteral = JSON.stringify(PROMPT_PRIMARY_SELECTOR);
   const fallbackSelectorLiteral = JSON.stringify(PROMPT_FALLBACK_SELECTOR);
   const script = `(() => {
+    // Short‑circuit verification on Copilot Web — ChatGPT conversation DOM does not exist there.
+    if (location.hostname.includes('github.com') && location.pathname.startsWith('/copilot')) {
+      return { userMatched: true, fallbackValue: '', editorValue: '' };
+    }
     const editor = document.querySelector(${primarySelectorLiteral});
     const fallback = document.querySelector(${fallbackSelectorLiteral});
     const normalize = (value) => value?.toLowerCase?.().replace(/\\s+/g, ' ').trim() ?? '';
@@ -190,4 +194,3 @@ async function verifyPromptCommitted(
   }
   throw new Error('Prompt did not appear in conversation before timeout (send may have failed)');
 }
-

@@ -27,7 +27,11 @@ export function resolveBrowserConfig(config: BrowserAutomationConfig | undefined
     headless: config?.headless ?? DEFAULT_BROWSER_CONFIG.headless,
     keepBrowser: config?.keepBrowser ?? DEFAULT_BROWSER_CONFIG.keepBrowser,
     hideWindow: config?.hideWindow ?? DEFAULT_BROWSER_CONFIG.hideWindow,
-    desiredModel: config?.desiredModel ?? DEFAULT_BROWSER_CONFIG.desiredModel,
+    // If desiredModel is explicitly present and null, respect that as "no model selection"
+    desiredModel:
+      config && Object.prototype.hasOwnProperty.call(config, 'desiredModel')
+        ? config.desiredModel ?? null
+        : DEFAULT_BROWSER_CONFIG.desiredModel,
     chromeProfile: config?.chromeProfile ?? DEFAULT_BROWSER_CONFIG.chromeProfile,
     chromePath: config?.chromePath ?? DEFAULT_BROWSER_CONFIG.chromePath,
     debug: config?.debug ?? DEFAULT_BROWSER_CONFIG.debug,

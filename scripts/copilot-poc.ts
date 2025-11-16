@@ -18,14 +18,16 @@ async function main() {
   const prompt = args.join(' ').trim() || 'Hello from the Oracle Copilot POC. Please respond with a short acknowledgement.';
 
   const config: BrowserAutomationConfig = {
-    chromeProfile: null,
-    chromePath: null,
+    // Reuse the default Chrome profile so existing GitHub/Copilot login is available
+    chromeProfile: 'Default',
+    chromePath: '/usr/bin/google-chrome',
     // Point at Copilot Web instead of ChatGPT
     url: 'https://github.com/copilot/',
     timeoutMs: 900_000,
     inputTimeoutMs: 30_000,
+    // Copy cookies from the existing profile into the temporary profile for this run
     cookieSync: true,
-    headless: false,
+    headless: true,
     keepBrowser: false,
     hideWindow: false,
     desiredModel: null,
@@ -66,4 +68,3 @@ async function main() {
 }
 
 void main();
-

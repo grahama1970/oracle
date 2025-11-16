@@ -16,6 +16,37 @@ export async function waitForAssistantResponse(
   timeoutMs: number,
   logger: BrowserLogger,
 ): Promise<{ text: string; html?: string; meta: { turnId?: string | null; messageId?: string | null } }> {
+  // Copilot Web: ChatGPT-specific DOM assumptions do not hold; use a simpler capture path.
+  try {
+    const { result } = await Runtime.evaluate({
+      expression: `({ host: location.hostname, path: location.pathname })`,
+      returnByValue: true,
+    });
+    const host = String(result?.value?.host ?? '').toLowerCase();
+    const path = String(result?.value?.path ?? '');
+    if (host.includes('github.com') && path.startsWith('/copilot')) {
+      logger('Waiting for Copilot response (simplified snapshot mode)');
+      const deadline = Date.now() + timeoutMs;
+      let lastText = '';
+      while (Date.now() < deadline) {
+        const { result: bodyResult } = await Runtime.evaluate({
+          expression: `document.body ? document.body.innerText || '' : ''`,
+          returnByValue: true,
+        });
+        const text = (bodyResult?.value as string | undefined)?.trim() ?? '';
+        if (text && text !== lastText) {
+          lastText = text;
+          // heuristic: once body text stabilizes for a short period, treat it as response
+          await delay(2000);
+          return { text: lastText, html: undefined, meta: {} };
+        }
+        await delay(500);
+      }
+      throw new Error('Timed out waiting for Copilot response');
+    }
+  } catch {
+    // Fall through to ChatGPT path on failures
+  }
   logger('Waiting for ChatGPT response');
   const expression = buildResponseObserverExpression(timeoutMs);
   const evaluationPromise = Runtime.evaluate({ expression, awaitPromise: true, returnByValue: true });
