@@ -66,6 +66,24 @@ export interface StoredRunOptions {
   heartbeatIntervalMs?: number;
   browserInlineFiles?: boolean;
   background?: boolean;
+  // Copilot diff automation flags (browser engine only)
+  emitDiffOnly?: boolean;
+  diffOutput?: string;
+  jsonOutput?: string;
+  strictDiff?: boolean;
+  retryIfNoDiff?: boolean;
+  maxRetries?: number;
+  followupPrompt?: string;
+  applyMode?: 'none' | 'check' | 'apply' | 'commit';
+  gitRoot?: string;
+  branch?: string;
+  commitMessage?: string;
+  exitOnPartial?: boolean;
+  sanitizePrompt?: boolean;
+  secretScan?: boolean;
+  domSnapshotIntervalMs?: number;
+  restrictPathPrefix?: string;
+  metricsOutput?: string;
 }
 
 export interface SessionMetadata {
@@ -91,6 +109,24 @@ export interface SessionMetadata {
   response?: SessionResponseMetadata;
   transport?: SessionTransportMetadata;
   error?: SessionUserErrorMetadata;
+  // Copilot diff automation metadata
+  diffFound?: boolean;
+  diffValidated?: boolean;
+  diffApplied?: boolean;
+  applyMode?: 'none' | 'check' | 'apply' | 'commit';
+  branch?: string;
+  commitSha?: string;
+  retryCount?: number;
+  incompleteReason?: string | null;
+  patchBytes?: number;
+  promptChars?: number;
+  responseChars?: number;
+  copilotDomSnapshots?: string[];
+  secretScan?: {
+    status: 'ok' | 'matches_detected';
+    matches: string[];
+  };
+  resultStatus?: string;
 }
 
 interface SessionLogWriter {
@@ -149,6 +185,10 @@ export function createSessionId(prompt: string, customSlug?: string): string {
 
 function sessionDir(id: string): string {
   return path.join(SESSIONS_DIR, id);
+}
+
+export function getSessionDir(sessionId: string): string {
+  return sessionDir(sessionId);
 }
 
 function metaPath(id: string): string {
@@ -215,6 +255,23 @@ export async function initializeSession(options: InitializeSessionOptions, cwd: 
       heartbeatIntervalMs: options.heartbeatIntervalMs,
       browserInlineFiles: options.browserInlineFiles,
       background: options.background,
+      emitDiffOnly: options.emitDiffOnly,
+      diffOutput: options.diffOutput,
+      jsonOutput: options.jsonOutput,
+      strictDiff: options.strictDiff,
+      retryIfNoDiff: options.retryIfNoDiff,
+      maxRetries: options.maxRetries,
+      followupPrompt: options.followupPrompt,
+      applyMode: options.applyMode,
+      gitRoot: options.gitRoot,
+      branch: options.branch,
+      commitMessage: options.commitMessage,
+      exitOnPartial: options.exitOnPartial,
+      sanitizePrompt: options.sanitizePrompt,
+      secretScan: options.secretScan,
+      domSnapshotIntervalMs: options.domSnapshotIntervalMs,
+      restrictPathPrefix: options.restrictPathPrefix,
+      metricsOutput: options.metricsOutput,
     },
   };
   await fs.writeFile(metaPath(sessionId), JSON.stringify(metadata, null, 2), 'utf8');

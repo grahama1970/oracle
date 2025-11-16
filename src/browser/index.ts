@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { resolveBrowserConfig } from './config.js';
@@ -68,6 +68,8 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
   let runStatus: 'attempted' | 'complete' = 'attempted';
   let connectionClosedUnexpectedly = false;
   let stopThinkingMonitor: (() => void) | null = null;
+  let stopSnapshotMonitor: (() => void) | null = null;
+  const snapshotPaths: string[] = [];
 
   try {
     client = await connectToChrome(chrome.port, logger);
@@ -139,6 +141,15 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
     }
     await submitPrompt({ runtime: Runtime, input: Input }, promptText, logger);
     stopThinkingMonitor = startThinkingStatusMonitor(Runtime, logger, options.verbose ?? false);
+    if (options.domSnapshotIntervalMs && options.domSnapshotIntervalMs > 0 && options.snapshotsDir) {
+      stopSnapshotMonitor = startDomSnapshotMonitor(
+        Runtime,
+        options.domSnapshotIntervalMs,
+        options.snapshotsDir,
+        logger,
+        snapshotPaths,
+      );
+    }
     const answer = await waitForAssistantResponse(Runtime, config.timeoutMs, logger);
     answerText = answer.text;
     answerHtml = answer.html ?? '';
@@ -164,6 +175,7 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
     ).catch(() => null);
     answerMarkdown = copiedMarkdown ?? answerText;
     stopThinkingMonitor?.();
+    stopSnapshotMonitor?.();
     runStatus = 'complete';
     const durationMs = Date.now() - startedAt;
     const answerChars = answerText.length;
@@ -178,10 +190,12 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
       chromePid: chrome.pid,
       chromePort: chrome.port,
       userDataDir,
+      snapshots: snapshotPaths.length > 0 ? snapshotPaths : undefined,
     };
   } catch (error) {
     const normalizedError = error instanceof Error ? error : new Error(String(error));
     stopThinkingMonitor?.();
+    stopSnapshotMonitor?.();
     const socketClosed = connectionClosedUnexpectedly || isWebSocketClosureError(normalizedError);
     connectionClosedUnexpectedly = connectionClosedUnexpectedly || socketClosed;
     if (!socketClosed) {
@@ -304,6 +318,58 @@ function startThinkingStatusMonitor(
   interval.unref?.();
   return () => {
     // biome-ignore lint/nursery/noUnnecessaryConditions: multiple callers may race to stop
+    if (stopped) {
+      return;
+    }
+    stopped = true;
+    clearInterval(interval);
+  };
+}
+
+function startDomSnapshotMonitor(
+  Runtime: ChromeClient['Runtime'],
+  intervalMs: number,
+  snapshotsDir: string,
+  logger: BrowserLogger,
+  snapshotPaths: string[],
+): () => void {
+  let stopped = false;
+  let pending = false;
+  let counter = 0;
+  const maxSnapshots = 50;
+  const ensureDir = async () => {
+    try {
+      await mkdir(snapshotsDir, { recursive: true });
+    } catch {
+      // ignore directory creation failures; snapshots will simply be skipped
+    }
+  };
+  const interval = setInterval(async () => {
+    if (stopped || pending || counter >= maxSnapshots) {
+      return;
+    }
+    pending = true;
+    try {
+      await ensureDir();
+      const snapshot = await readAssistantSnapshot(Runtime);
+      if (snapshot && snapshot.length > 0) {
+        counter += 1;
+        const fileName = `snapshot-${String(counter).padStart(3, '0')}.html`;
+        const filePath = `${snapshotsDir}/${fileName}`;
+        await writeFile(filePath, snapshot, 'utf8');
+        snapshotPaths.push(filePath);
+        if (logger.verbose) {
+          logger(`[browser] Saved DOM snapshot ${fileName}`);
+        }
+      }
+    } catch {
+      // ignore snapshot failures
+    } finally {
+      pending = false;
+    }
+  }, intervalMs);
+  interval.unref?.();
+  return () => {
     if (stopped) {
       return;
     }

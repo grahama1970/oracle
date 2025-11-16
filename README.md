@@ -16,7 +16,17 @@ Oracle gives your agents a simple, reliable way to **bundle a prompt plus the ri
 ## Two engines, one CLI
 
 - **API engine** — Calls the OpenAI Responses API. Needs `OPENAI_API_KEY`.
-- **Browser engine** — Automates ChatGPT in Chrome so you can use your Pro account directly. Toggle with `--engine browser`; no API key required.
+- **Browser engine** — Automates a web UI (ChatGPT by default) in Chrome so you can use your Pro account directly. Toggle with `--engine browser`; no API key required. You can override the target URL via `--browser-url`, e.g.:
+
+  ```bash
+  # Default ChatGPT
+  oracle --engine browser --prompt "Summarize the risk register"
+
+  # Explicit host or full URL
+  oracle --engine browser --browser-url chatgpt.com --prompt "Summarize the risk register"
+  oracle --engine browser --browser-url https://github.com/copilot/ --prompt "Review this diff"
+  oracle --engine browser --browser-url gemini.google.com/app --prompt "Summarize the risk register"
+  ```
 
 If you omit `--engine`, Oracle prefers the API engine when `OPENAI_API_KEY` is present; otherwise it falls back to browser mode. Switch explicitly with `-e, --engine {api|browser}` when you want to override the auto choice. Everything else (prompt assembly, file handling, session logging) stays the same.
 
@@ -28,6 +38,16 @@ OPENAI_API_KEY=sk-... npx -y @steipete/oracle -p "Summarize the risk register" -
 
 # Browser engine (no API key)
 npx -y @steipete/oracle --engine browser -p "Summarize the risk register" --file docs/risk-register.md docs/risk-matrix.md
+
+In this fork, the long‑term goal is for a Codex‑style agent to assemble a **code review prompt** using a template like `docs/templates/COPILOT_REVIEW_REQUEST_EXAMPLE.md` and then drive a Copilot review run directly against `https://github.com/copilot/` instead of `https://chatgpt.com/`.
+
+The intended future UX for that flow looks roughly like:
+
+```bash
+npx -y @steipete/oracle --engine browser --copilot docs/templates/COPILOT_CODE_REVIEW.md
+```
+
+That `--copilot` flag is not implemented yet; it is reserved here to document the desired direction for this fork (GitHub Copilot‑optimized browser runs using structured review request templates).
 
 # Globs/exclusions
 npx -y @steipete/oracle -p "Review the TS data layer" --file "src/**/*.ts" --file "!src/**/*.test.ts"
@@ -70,6 +90,43 @@ oracle session <id>                 # replay a run locally
 | `-v, --verbose` | Extra logging (also surfaces advanced flags with `--help`). |
 
 More knobs (`--max-input`, cookie sync controls for browser mode, etc.) live behind `oracle --help --verbose`.
+
+## Copilot unified diff automation (browser engine)
+
+When you run Oracle with `--engine browser`, you can ask ChatGPT/Copilot to return a **unified diff** and let Oracle extract, validate, and optionally apply that patch for you. This is designed for agents (or scripts) that want hands-free patch generation.
+
+Core flags:
+
+| Flag | Purpose |
+| --- | --- |
+| `--emit-diff-only` | Enable diff extraction mode for browser runs. |
+| `--diff-output <path>` | Write the extracted unified diff to this path (defaults to the session directory). |
+| `--json-output <path>` | Write a machine-readable JSON result summary (defaults to `result.json` in the session directory). |
+| `--strict-diff` | Require a well-formed unified diff with numeric hunk headers. |
+| `--retry-if-no-diff` | Retry once (or up to `--max-retries`) when no valid diff block is found. |
+| `--apply-mode <none\|check\|apply\|commit>` | Control patch handling: just emit, validate only, apply to the working tree, or apply + commit. |
+| `--git-root <path>` | Git repository root for patch validation/application (defaults to the current working directory). |
+| `--branch <name>` | Record the intended target branch name in session metadata/JSON. |
+| `--commit-message <text>` | Commit message when `--apply-mode=commit`. |
+| `--exit-on-partial` | Treat truncated/partial diff fences as failures. |
+| `--sanitize-prompt` | Redact common secret patterns in the browser prompt before sending it. |
+| `--secret-scan` | Fail the run when secret-like data is detected in the prompt. |
+
+Example end-to-end run:
+
+```bash
+oracle --engine browser \
+  --prompt "$(cat spec.md)" \
+  --slug fix-step06 \
+  --emit-diff-only \
+  --diff-output ./out/fix-step06.patch \
+  --json-output ./out/fix-step06.json \
+  --apply-mode apply \
+  --branch fix/restore-pipeline-steps-20251031-073204 \
+  --retry-if-no-diff --max-retries 1 --strict-diff
+```
+
+The JSON result includes a `status` field (`success`, `diff_missing`, `partial`, `secret_detected`, `apply_failed`, `commit_failed`, `timeout`, `error`, etc.), the path to the diff file, retry count, and basic metrics (elapsed time, prompt/response sizes, patch size). See `docs/INTEGRATION-PYTHON.md` for a Python-oriented integration guide.
 
 ## Sessions & background runs
 

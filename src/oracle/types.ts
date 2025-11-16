@@ -76,6 +76,7 @@ export interface RunOracleOptions {
   model: ModelName;
   file?: string[];
   slug?: string;
+  // Browser + session extensions (ignored by core API engine)
   filesReport?: boolean;
   maxInput?: number;
   maxOutput?: number;
@@ -90,6 +91,24 @@ export interface RunOracleOptions {
   heartbeatIntervalMs?: number;
   browserInlineFiles?: boolean;
   background?: boolean;
+  // Copilot diff automation flags (browser engine only)
+  emitDiffOnly?: boolean;
+  diffOutput?: string;
+  jsonOutput?: string;
+  strictDiff?: boolean;
+  retryIfNoDiff?: boolean;
+  maxRetries?: number;
+  followupPrompt?: string;
+  applyMode?: 'none' | 'check' | 'apply' | 'commit';
+  gitRoot?: string;
+  branch?: string;
+  commitMessage?: string;
+  exitOnPartial?: boolean;
+  sanitizePrompt?: boolean;
+  secretScan?: boolean;
+  domSnapshotIntervalMs?: number;
+  restrictPathPrefix?: string;
+  metricsOutput?: string;
 }
 
 export interface UsageSummary {

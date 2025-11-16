@@ -64,6 +64,21 @@ export async function performSessionRun({
         response: undefined,
         transport: undefined,
         error: undefined,
+        diffFound: Boolean(result.diffPath),
+        diffValidated:
+          result.status === 'success' || result.status === 'apply_failed' || result.status === 'commit_failed',
+        diffApplied: result.status === 'success' || result.status === 'commit_failed',
+        applyMode: runOptions.applyMode,
+        branch: runOptions.branch,
+        commitSha: result.commitSha,
+        retryCount: result.retryCount,
+        incompleteReason: null,
+        patchBytes: result.patchBytes,
+        promptChars: result.promptChars,
+        responseChars: result.responseChars,
+        copilotDomSnapshots: result.snapshots,
+        secretScan: result.secretScan,
+        resultStatus: result.status,
       });
       return;
     }

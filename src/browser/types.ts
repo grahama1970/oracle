@@ -57,6 +57,9 @@ export interface BrowserRunOptions {
   log?: BrowserLogger;
   heartbeatIntervalMs?: number;
   verbose?: boolean;
+   // When set, capture assistant DOM snapshots into the active session directory.
+  domSnapshotIntervalMs?: number;
+  snapshotsDir?: string;
 }
 
 export interface BrowserRunResult {
@@ -69,7 +72,20 @@ export interface BrowserRunResult {
   chromePid?: number;
   chromePort?: number;
   userDataDir?: string;
+  snapshots?: string[];
 }
+
+export type DiffRunStatus =
+  | 'success'
+  | 'timeout'
+  | 'error'
+  | 'diff_missing'
+  | 'partial'
+  | 'secret_detected'
+  | 'apply_failed'
+  | 'commit_failed'
+  | 'invalid_diff'
+  | 'no_input';
 
 export type ResolvedBrowserConfig = Required<
   Omit<BrowserAutomationConfig, 'chromeProfile' | 'chromePath' | 'desiredModel'>

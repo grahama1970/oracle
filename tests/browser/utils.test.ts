@@ -1,5 +1,12 @@
 import { describe, expect, test, vi } from 'vitest';
-import { parseDuration, estimateTokenCount, delay, withRetries } from '../../src/browser/utils.js';
+import {
+  parseDuration,
+  estimateTokenCount,
+  delay,
+  withRetries,
+  scanForSecrets,
+  sanitizeSecrets,
+} from '../../src/browser/utils.js';
 
 describe('parseDuration', () => {
   test.each([
@@ -51,5 +58,25 @@ describe('withRetries', () => {
     }, { retries: 3, delayMs: 1 });
     expect(result).toBe('done');
     expect(attempt).toBe(3);
+  });
+});
+
+describe('secret scanning helpers', () => {
+  test('detects common secret-like patterns', () => {
+    const text = `
+      AWS key: AKIA1234567890ABCD
+      Bearer abcdefghijklmnopqrstuvwxyz0123456789
+      API_KEY="supersecret"
+    `;
+    const matches = scanForSecrets(text);
+    expect(matches.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test('sanitizes detected secrets with redaction', () => {
+    const text = 'API_KEY="supersecret"';
+    const matches = scanForSecrets(text);
+    const sanitized = sanitizeSecrets(text, matches);
+    expect(sanitized).not.toContain('supersecret');
+    expect(sanitized).toContain('***REDACTED***');
   });
 });

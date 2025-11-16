@@ -27,6 +27,26 @@ export interface BrowserFlagOptions {
   verbose?: boolean;
 }
 
+function normalizeBrowserUrl(rawUrl: string | undefined): string | undefined {
+  if (!rawUrl) {
+    return undefined;
+  }
+  const trimmed = rawUrl.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const hasScheme = /^https?:\/\//i.test(trimmed);
+  if (hasScheme) {
+    return trimmed;
+  }
+  // Treat bare host or host+path as HTTPS by default, e.g.:
+  //   chatgpt.com -> https://chatgpt.com
+  //   github.com/copilot -> https://github.com/copilot
+  //   gemini.google.com/app -> https://gemini.google.com/app
+  const withoutLeadingSlash = trimmed.replace(/^\/+/, '');
+  return `https://${withoutLeadingSlash}`;
+}
+
 export function buildBrowserConfig(options: BrowserFlagOptions): BrowserSessionConfig {
   const desiredModelOverride = options.browserModelLabel?.trim();
   const normalizedOverride = desiredModelOverride?.toLowerCase() ?? '';
@@ -35,7 +55,7 @@ export function buildBrowserConfig(options: BrowserFlagOptions): BrowserSessionC
   return {
     chromeProfile: options.browserChromeProfile ?? DEFAULT_CHROME_PROFILE,
     chromePath: options.browserChromePath ?? null,
-    url: options.browserUrl,
+    url: normalizeBrowserUrl(options.browserUrl),
     timeoutMs: options.browserTimeout ? parseDuration(options.browserTimeout, DEFAULT_BROWSER_TIMEOUT_MS) : undefined,
     inputTimeoutMs: options.browserInputTimeout
       ? parseDuration(options.browserInputTimeout, DEFAULT_BROWSER_INPUT_TIMEOUT_MS)

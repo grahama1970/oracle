@@ -77,6 +77,24 @@ interface CliOptions extends OptionValues {
   heartbeat?: number;
   status?: boolean;
   dryRun?: boolean;
+  // Copilot diff automation flags (browser engine only)
+  emitDiffOnly?: boolean;
+  diffOutput?: string;
+  jsonOutput?: string;
+  strictDiff?: boolean;
+  retryIfNoDiff?: boolean;
+  maxRetries?: number;
+  followupPrompt?: string;
+  applyMode?: 'none' | 'check' | 'apply' | 'commit';
+  gitRoot?: string;
+  branch?: string;
+  commitMessage?: string;
+  exitOnPartial?: boolean;
+  sanitizePrompt?: boolean;
+  secretScan?: boolean;
+  domSnapshot?: number;
+  restrictPathPrefix?: string;
+  metricsOutput?: string;
 }
 
 type ResolvedCliOptions = Omit<CliOptions, 'model'> & { model: ModelName };
@@ -162,7 +180,12 @@ program
   .addOption(new Option('--browser', '(deprecated) Use --engine browser instead.').default(false).hideHelp())
   .addOption(new Option('--browser-chrome-profile <name>', 'Chrome profile name/path for cookie reuse.').hideHelp())
   .addOption(new Option('--browser-chrome-path <path>', 'Explicit Chrome or Chromium executable path.').hideHelp())
-  .addOption(new Option('--browser-url <url>', `Override the ChatGPT URL (default ${CHATGPT_URL}).`).hideHelp())
+  .addOption(
+    new Option(
+      '--browser-url <url>',
+      `Override the ChatGPT URL (default ${CHATGPT_URL}). Accepts full URLs (https://...) or bare hosts like "chatgpt.com" or "github.com/copilot".`,
+    ).hideHelp(),
+  )
   .addOption(new Option('--browser-timeout <ms|s|m>', 'Maximum time to wait for an answer (default 900s).').hideHelp())
   .addOption(
     new Option('--browser-input-timeout <ms|s|m>', 'Maximum time to wait for the prompt textarea (default 30s).').hideHelp(),
@@ -175,8 +198,75 @@ program
     new Option('--browser-allow-cookie-errors', 'Continue even if Chrome cookies cannot be copied.').hideHelp(),
   )
   .addOption(
-    new Option('--browser-inline-files', 'Paste files directly into the ChatGPT composer instead of uploading attachments.').default(false),
+    new Option(
+      '--browser-inline-files',
+      'Paste files directly into the ChatGPT composer instead of uploading attachments.',
+    ).default(false),
   )
+  .option(
+    '--emit-diff-only',
+    'Extract the first valid unified diff from the assistant response and write it to a patch file (browser engine only).',
+    false,
+  )
+  .option(
+    '--diff-output <path>',
+    'Path to write the extracted unified diff (defaults to the session directory when omitted).',
+  )
+  .option(
+    '--json-output <path>',
+    'Path to write a machine-readable JSON result summary (defaults to the session directory when omitted).',
+  )
+  .option('--strict-diff', 'Treat malformed or non-unified diffs as failures.', false)
+  .option('--retry-if-no-diff', 'Retry the browser run once when no valid diff is found.', false)
+  .addOption(
+    new Option('--max-retries <count>', 'Maximum number of diff retries when using --retry-if-no-diff.')
+      .argParser((value: string) => {
+        const parsed = Number.parseInt(value, 10);
+        if (Number.isNaN(parsed) || parsed < 0) {
+          throw new Error('max-retries must be a non-negative integer.');
+        }
+        return parsed;
+      })
+      .default(1)
+      .hideHelp(),
+  )
+  .option(
+    '--followup-prompt <text>',
+    'Custom follow-up prompt used when retrying a diff-only run (browser engine only).',
+  )
+  .addOption(
+    new Option('--apply-mode <mode>', 'How to handle the extracted patch (none | check | apply | commit).')
+      .choices(['none', 'check', 'apply', 'commit'])
+      .default('none'),
+  )
+  .option(
+    '--git-root <path>',
+    'Git repository root to validate/apply the patch against (defaults to the current working directory).',
+  )
+  .option('--branch <name>', 'Intended target branch label to record in the session metadata.')
+  .option('--commit-message <text>', 'Commit message to use when --apply-mode=commit.')
+  .option('--exit-on-partial', 'Treat truncated or partially fenced diff blocks as failures.', false)
+  .option('--sanitize-prompt', 'Redact common secret patterns in the browser prompt before sending it.', false)
+  .option('--secret-scan', 'Scan the browser prompt for common secrets and fail the run when any are detected.', false)
+  .addOption(
+    new Option(
+      '--dom-snapshot <ms>',
+      'Capture assistant DOM HTML snapshots during browser runs at the given interval (milliseconds).',
+    )
+      .argParser((value: string) => {
+        const parsed = Number.parseInt(value, 10);
+        if (Number.isNaN(parsed) || parsed <= 0) {
+          throw new Error('dom-snapshot interval must be a positive integer.');
+        }
+        return parsed;
+      })
+      .hideHelp(),
+  )
+  .option(
+    '--restrict-path-prefix <dir>',
+    'Require all diff paths (diff --git a/… b/…) to fall under the provided directory prefix.',
+  )
+  .option('--metrics-output <path>', 'Optional JSON file capturing timing and polling metrics for browser runs.')
   .option('--debug-help', 'Show the advanced/debug option set and exit.', false)
   .option('--heartbeat <seconds>', 'Emit periodic in-progress updates (0 to disable).', parseHeartbeatOption, 30)
   .showHelpAfterError('(use --help for usage)');
@@ -271,6 +361,23 @@ function buildRunOptions(options: ResolvedCliOptions, overrides: Partial<RunOrac
     heartbeatIntervalMs: overrides.heartbeatIntervalMs ?? resolveHeartbeatIntervalMs(options.heartbeat),
     browserInlineFiles: overrides.browserInlineFiles ?? options.browserInlineFiles ?? false,
     background: overrides.background ?? undefined,
+    emitDiffOnly: overrides.emitDiffOnly ?? options.emitDiffOnly ?? false,
+    diffOutput: overrides.diffOutput ?? options.diffOutput,
+    jsonOutput: overrides.jsonOutput ?? options.jsonOutput,
+    strictDiff: overrides.strictDiff ?? options.strictDiff ?? false,
+    retryIfNoDiff: overrides.retryIfNoDiff ?? options.retryIfNoDiff ?? false,
+    maxRetries: overrides.maxRetries ?? options.maxRetries,
+    followupPrompt: overrides.followupPrompt ?? options.followupPrompt,
+    applyMode: overrides.applyMode ?? options.applyMode,
+    gitRoot: overrides.gitRoot ?? options.gitRoot,
+    branch: overrides.branch ?? options.branch,
+    commitMessage: overrides.commitMessage ?? options.commitMessage,
+    exitOnPartial: overrides.exitOnPartial ?? options.exitOnPartial ?? false,
+    sanitizePrompt: overrides.sanitizePrompt ?? options.sanitizePrompt ?? false,
+    secretScan: overrides.secretScan ?? options.secretScan ?? false,
+    domSnapshotIntervalMs: overrides.domSnapshotIntervalMs ?? options.domSnapshot,
+    restrictPathPrefix: overrides.restrictPathPrefix ?? options.restrictPathPrefix,
+    metricsOutput: overrides.metricsOutput ?? options.metricsOutput,
   };
 }
 
@@ -302,6 +409,23 @@ function buildRunOptionsFromMetadata(metadata: SessionMetadata): RunOracleOption
     heartbeatIntervalMs: stored.heartbeatIntervalMs,
     browserInlineFiles: stored.browserInlineFiles,
     background: stored.background,
+    emitDiffOnly: stored.emitDiffOnly,
+    diffOutput: stored.diffOutput,
+    jsonOutput: stored.jsonOutput,
+    strictDiff: stored.strictDiff,
+    retryIfNoDiff: stored.retryIfNoDiff,
+    maxRetries: stored.maxRetries,
+    followupPrompt: stored.followupPrompt,
+    applyMode: stored.applyMode,
+    gitRoot: stored.gitRoot,
+    branch: stored.branch,
+    commitMessage: stored.commitMessage,
+    exitOnPartial: stored.exitOnPartial,
+    sanitizePrompt: stored.sanitizePrompt,
+    secretScan: stored.secretScan,
+    domSnapshotIntervalMs: stored.domSnapshotIntervalMs,
+    restrictPathPrefix: stored.restrictPathPrefix,
+    metricsOutput: stored.metricsOutput,
   };
 }
 
@@ -500,6 +624,38 @@ async function runInteractiveSession(
     throw error;
   } finally {
     stream.end();
+    if (mode === 'browser') {
+      const latestMeta = await readSessionMetadata(sessionMeta.id);
+      const status = latestMeta?.resultStatus;
+      if (status) {
+        switch (status) {
+          case 'success':
+            process.exitCode = 0;
+            break;
+          case 'diff_missing':
+          case 'partial':
+          case 'invalid_diff':
+          case 'no_input':
+            process.exitCode = 2;
+            break;
+          case 'secret_detected':
+            process.exitCode = 3;
+            break;
+          case 'apply_failed':
+            process.exitCode = 4;
+            break;
+          case 'commit_failed':
+            process.exitCode = 5;
+            break;
+          case 'timeout':
+            process.exitCode = 6;
+            break;
+          default:
+            process.exitCode = process.exitCode ?? 1;
+            break;
+        }
+      }
+    }
   }
 }
 
@@ -571,6 +727,26 @@ function printDebugHelp(cliName: string): void {
     ['--browser-headless', 'Launch Chrome in headless mode.'],
     ['--browser-hide-window', 'Hide the Chrome window (macOS headful only).'],
     ['--browser-keep-browser', 'Leave Chrome running after completion.'],
+  ]);
+  console.log('');
+  console.log(chalk.bold('Copilot Diff Automation (browser engine only)'));
+  printDebugOptionGroup([
+    ['--emit-diff-only', 'Extract the first unified diff from the assistant response.'],
+    ['--diff-output <path>', 'Write the extracted diff patch to the given file.'],
+    ['--json-output <path>', 'Write a machine-readable result.json summary next to the session metadata.'],
+    ['--strict-diff', 'Require a well-formed unified diff with numeric hunks.'],
+    ['--retry-if-no-diff', 'Retry once when no valid diff block is detected.'],
+    ['--max-retries <count>', 'Cap the number of diff retries (default 1).'],
+    ['--apply-mode <mode>', 'Control patch handling: none | check | apply | commit.'],
+    ['--git-root <path>', 'Limit patch validation/application to the specified Git repository.'],
+    ['--branch <name>', 'Record the intended target branch name in metadata.'],
+    ['--commit-message <text>', 'Commit message used when apply-mode=commit.'],
+    ['--exit-on-partial', 'Fail when the assistant returns a truncated or partial diff fence.'],
+    ['--sanitize-prompt', 'Redact common secret patterns before sending the browser prompt.'],
+    ['--secret-scan', 'Fail the run when secret-like data is detected in the prompt.'],
+    ['--dom-snapshot <ms>', 'Capture assistant DOM HTML snapshots on the given interval (ms).'],
+    ['--restrict-path-prefix <dir>', 'Require all diff paths to stay under the given directory prefix.'],
+    ['--metrics-output <path>', 'Emit timing and phase metrics for browser runs.'],
   ]);
   console.log('');
   console.log(chalk.dim(`Tip: run \`${cliName} --help\` to see the primary option set.`));
