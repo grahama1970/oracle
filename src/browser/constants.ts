@@ -1,5 +1,8 @@
 export const CHATGPT_URL = 'https://chatgpt.com/';
-export const DEFAULT_MODEL_TARGET = 'ChatGPT 5.1';
+// Default browser model label used when no override is provided.
+// The canonical API model id is `gpt-5.1`, but the ChatGPT UI
+// currently surfaces this path as “GPT-5” in the model picker.
+export const DEFAULT_MODEL_TARGET = 'GPT-5';
 export const COOKIE_URLS = ['https://chatgpt.com', 'https://chat.openai.com', 'https://github.com', 'https://copilot.github.com', 'https://github.com/copilot'];
 
 export const INPUT_SELECTORS = [

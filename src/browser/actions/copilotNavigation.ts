@@ -40,13 +40,31 @@ export async function checkCopilotAuthentication(
   // Check for Copilot chat interface vs marketing page
   const authCheck = await Runtime.evaluate({
     expression: `(() => {
-      // Look for Copilot chat interface elements
-      const hasChatInput = document.querySelector('textarea[data-qa*="copilot"], input[data-testid*="copilot"]') !== null;
+      // Look for Copilot chat interface elements. GitHub frequently tweaks
+      // the DOM, so use a broader selector set that also covers
+      // contenteditable chat composers.
+      const chatSelectors = [
+        '#copilot-chat-textarea',
+        'textarea[data-qa*="copilot"]',
+        'textarea[placeholder*="Ask Copilot"]',
+        'textarea[placeholder*="Ask anything"]',
+        'textarea[aria-label*="Ask anything"]',
+        'textarea[name="question"]',
+        'input[data-testid*="copilot"]',
+        'div[contenteditable="true"][role="textbox"]',
+        'div[contenteditable="true"][data-qa*="copilot"]',
+        'div[contenteditable="true"][aria-label*="Copilot"]'
+      ];
+      const hasChatInput = chatSelectors.some(sel => document.querySelector(sel));
       const hasMarketingPrompt = document.querySelector('[href*="signup"], [href*="login"]') !== null;
       const pageTitle = document.title.toLowerCase();
+      const currentUrl = window.location.href;
 
       // Check if we're on Copilot vs marketing page
-      const likelyAuthenticated = hasChatInput && !hasMarketingPrompt && !pageTitle.includes('sign');
+      const likelyAuthenticated =
+        !hasMarketingPrompt &&
+        currentUrl.includes('/copilot') &&
+        pageTitle.includes('copilot');
 
       return {
         authenticated: likelyAuthenticated,
@@ -81,10 +99,16 @@ export async function ensureCopilotPromptReady(
   logger('Ensuring Copilot chat input is ready...');
 
   const selectors = [
+    '#copilot-chat-textarea',
     'textarea[data-qa*="copilot"]',
     'textarea[placeholder*="Ask Copilot"]',
+    'textarea[placeholder*="Ask anything"]',
+    'textarea[aria-label*="Ask anything"]',
     'input[data-testid*="copilot"]',
-    'textarea[name="question"]'
+    'textarea[name="question"]',
+    'div[contenteditable="true"][role="textbox"]',
+    'div[contenteditable="true"][data-qa*="copilot"]',
+    'div[contenteditable="true"][aria-label*="Copilot"]'
   ];
 
   let inputElementPath = null;
@@ -200,8 +224,13 @@ export async function waitForCopilotResponse(
   while (Date.now() - started < timeoutMs) {
     const result = await Runtime.evaluate({
       expression: `(() => {
-        // Check for recent character count helper on elements (could be a <div temp= placeholder)
-        const candidateEls = document.querySelectorAll('${responseSelectors.join(', ')}');
+        // Prefer the Copilot markdown container when available; it holds the
+        // assistant's rendered markdown without sidebar chrome.
+        const markdownRoot = document.querySelector('div.markdown-body.MarkdownRenderer-module__container--dNKcF[data-copilot-markdown="true"]') ||
+          document.querySelector('div.markdown-body[data-copilot-markdown="true"]');
+
+        const scope = markdownRoot || document;
+        const candidateEls = scope.querySelectorAll('${responseSelectors.join(', ')}');
         let text = '';
         let html = '';
 
@@ -212,14 +241,14 @@ export async function waitForCopilotResponse(
           html = el.innerHTML;
         } else {
           // Fallback: try markdown from last div containing code blocks (likely GitHub markdown)
-          const lastDiv = document.querySelector('div .markdown-recirculation:last-of-type, div[class*="markdown"]:not(:empty):last-of-type');
+          const lastDiv = scope.querySelector('div .markdown-recirculation:last-of-type, div[class*="markdown"]:not(:empty):last-of-type');
           if (lastDiv) {
             text = lastDiv.innerText || lastDiv.textContent || '';
             html = lastDiv.innerHTML;
           }
         }
 
-        const isTyping = document.querySelector('.animate-something, .pulse, [data-working="true"]') !== null;
+        const isTyping = scope.querySelector('.animate-something, .pulse, [data-working="true"]') !== null;
 
         return {
           text: text.trim(),

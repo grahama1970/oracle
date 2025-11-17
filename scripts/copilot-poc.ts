@@ -17,10 +17,18 @@ async function main() {
   const [, , ...args] = process.argv;
   const prompt = args.join(' ').trim() || 'Hello from the Oracle Copilot POC. Please respond with a short acknowledgement.';
 
+  // Prefer the same env vars used by the main CLI / auth helpers.
+  const chromeProfileEnv = process.env.CHROME_PROFILE_DIR;
+  const chromeProfile = chromeProfileEnv && chromeProfileEnv.trim().length > 0
+    ? chromeProfileEnv
+    : 'Default';
+
+  const chromePath = process.env.CHROME_PATH || '/usr/bin/google-chrome';
+
   const config: BrowserAutomationConfig = {
-    // Reuse the default Chrome profile so existing GitHub/Copilot login is available
-    chromeProfile: 'Default',
-    chromePath: '/usr/bin/google-chrome',
+    // Reuse the configured Chrome profile so existing GitHub/Copilot login is available
+    chromeProfile,
+    chromePath,
     // Point at Copilot Web instead of ChatGPT
     url: 'https://github.com/copilot/',
     timeoutMs: 900_000,

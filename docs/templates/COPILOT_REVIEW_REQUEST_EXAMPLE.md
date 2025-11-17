@@ -12,6 +12,24 @@
     2. Copilot answers the clarifying questions inline.
     3. Copilot proposes any changes as one or more unified diffs
        inside fenced ```diff blocks that satisfy the constraints below.
+
+  IMPORTANT WORKFLOW:
+    - Do NOT run this template against unpushed local changes.
+    - First:
+        1. Create a feature branch (if you are on main),
+        2. Commit the code you want Copilot to review,
+        3. Push the branch to your Git remote.
+    - Then update the Repo / Branch section below to match the pushed
+      `owner/repo` and branch name exactly so Copilot can see the code.
+
+  Typical Oracle invocation (adjust paths as needed):
+
+    oracle \\
+      --engine browser \\
+      --model gpt-5.1 \\
+      --copilot \\
+      --copilot-max-turns 3 \\
+      --prompt \"<paste this template as the prompt body>\"
 -->
 
 # Fix Step 06 progress logging and sanitize HTML before Readability to prevent hangs

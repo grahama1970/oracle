@@ -30,6 +30,36 @@ Oracle gives your agents a simple, reliable way to **bundle a prompt plus the ri
 
 If you omit `--engine`, Oracle prefers the API engine when `OPENAI_API_KEY` is present; otherwise it falls back to browser mode. Switch explicitly with `-e, --engine {api|browser}` when you want to override the auto choice. Everything else (prompt assembly, file handling, session logging) stays the same.
 
+### GitHub Copilot authentication (this fork)
+
+For Copilot browser runs against `https://github.com/copilot/`, this fork expects a Chrome profile that is already authenticated to GitHub. The canonical path uses Playwright + TOTP:
+
+```bash
+# 1) Configure credentials (either export in your shell or put them in .env)
+export GITHUB_USERNAME="your-username"
+export GITHUB_PASSWORD="your-password"
+export GITHUB_TOTP_SECRET="base32-totp-secret"   # optional, for 2FA
+export CHROME_PATH="/usr/bin/google-chrome"      # optional override
+
+# Optional: point at an existing logged-in Chrome profile instead of a fresh one
+# e.g. CHROME_PROFILE_DIR="$HOME/.config/google-chrome/Default"
+export CHROME_PROFILE_DIR="$HOME/.config/google-chrome/Default"
+
+# 2) Establish a session (headless via virtual display, or headful if you have a GUI)
+xvfb-run -a pnpm tsx scripts/authenticate-github-enhanced.ts --headless
+
+# 3) Validate that Copilot chat is reachable, not just the marketing/auth page
+xvfb-run -a pnpm tsx tmp/validate-auth-enhanced.ts --headless --quick
+```
+
+By default, the enhanced auth script persists the session under `~/.oracle/chrome-profile`. Example usage with the browser engine:
+
+```bash
+pnpm tsx scripts/use-authenticated-copilot.ts auth
+```
+
+The browser engine and Copilot POC scripts will then reuse that authenticated profile when targeting `https://github.com/copilot/`.
+
 ## Quick start
 
 ```bash

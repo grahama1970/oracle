@@ -14,7 +14,10 @@ This document is the single source of truth for how this Oracle fork is expected
 - **Roles**
   - **Project agents (per‑repo) MUST:**
     - Decide what code, diffs, and context to include.
-    - Construct the review or patch request text (often using a template like `docs/templates/COPILOT_REVIEW_REQUEST_EXAMPLE.md`).
+    - Ensure the code to be reviewed exists in a **pushed feature branch** that Copilot can see:
+      - If working on `main` or on an untracked workspace, first create a feature branch, commit the relevant changes locally, and push that branch to the Git remote.
+      - Include the GitHub repo (`owner/repo`) and branch name explicitly in the review request so Copilot can resolve file paths against the correct branch.
+    - Construct the review or patch request text (often using a template like `docs/templates/COPILOT_REVIEW_REQUEST_EXAMPLE.md`) and keep its “Repo / Branch” section in sync with the pushed feature branch.
     - Choose the desired engine (`--engine api|browser`) and target UI (`--browser-url`, or a future `--copilot` convenience flag).
     - Decide whether patches should be applied/committed or only emitted.
   - **Oracle MUST:**
@@ -23,6 +26,29 @@ This document is the single source of truth for how this Oracle fork is expected
     - Persist logs and JSON artifacts under `~/.oracle/sessions/<slug>`.
     - Respect apply modes and safety flags documented below.
     - For this fork’s Copilot workflow, perform `git` commit + push via the repo’s helper when instructed to apply diffs, so project agents do not have to perform those steps by hand.
+
+### Interaction Patterns: Legacy Copy/Paste vs Browser Transport
+
+- **Legacy (human copy/paste) flow**
+  - A human or project agent:
+    - Runs `oracle` (or a repo script) to assemble a review request.
+    - Manually pastes that request into Copilot / ChatGPT in a browser tab.
+    - Copies the assistant’s markdown reply (answers + unified diff) back into an agent chat (e.g., this Codex CLI) for interpretation.
+  - The agent:
+    - Reads the pasted markdown,
+    - Decides which hunks to accept,
+    - Tells the human which patch to apply or emits a patch file for them.
+
+- **New (Oracle‑mediated) browser transport**
+  - Oracle now owns the browser interaction and eliminates manual copy/paste:
+    - Project agents still construct the request (often via `COPILOT_REVIEW_REQUEST_EXAMPLE.md` or a repo‑specific template).
+    - Oracle (or a helper script such as `scripts/copilot-code-review.ts`) launches Chrome headless, navigates to Copilot Web, pastes the prompt, and waits for the response.
+    - Oracle reads the assistant’s markdown directly from the DOM, extracts the best unified diff, and writes it to patch files (e.g., `tmp/copilot-review-turn-1.patch`) and JSON artifacts.
+  - The human’s role is now limited to:
+    - Kicking off the command and, when needed, approving GitHub 2FA/passkeys,
+    - Reviewing Oracle’s summary/patch application decisions,
+    - Overriding or re‑running sessions if they disagree.
+  - No human copy/paste between Copilot and Oracle is required in the new flow; Oracle is responsible for faithfully mirroring the assistant’s markdown into machine‑readable artifacts and applying diffs according to this contract.
 
 ---
 
@@ -44,7 +70,40 @@ This document is the single source of truth for how this Oracle fork is expected
 
 ---
 
-## 3. Sessions, Slugs & Artifacts
+## 3. Authentication (GitHub / Copilot Web)
+
+- **Goal**
+  - Oracle’s browser engine MUST run against a browser profile that is already authenticated to GitHub so that `https://github.com/copilot/` loads the Copilot UI, not the marketing/sign‑in page.
+
+- **Paved path (Kimi auth flow)**
+  - This fork uses a dedicated Playwright+TOTP authentication helper as the canonical way to establish and refresh a Copilot session:
+    - `scripts/authenticate-github-enhanced.ts` (Playwright + `otplib`):
+      - Logs in to GitHub (username/password), or validates an existing authenticated Chrome profile,
+      - Handles time‑based one‑time passwords (2FA) when `GITHUB_TOTP_SECRET` is set,
+      - Navigates to Copilot and verifies access,
+      - Persists the session in a Chrome profile suitable for reuse.
+    - `tmp/validate-auth-enhanced.ts`:
+      - Validates that the chosen profile session:
+        - Is authenticated to GitHub, and
+        - Reaches the Copilot chat UI (not just the marketing/sign‑in page).
+    - Both scripts MUST load credentials from environment variables (either exported in the shell or provided via a `.env` file in this repo). At minimum:
+      - `GITHUB_USERNAME` — your GitHub username.
+      - `GITHUB_PASSWORD` — your GitHub password.
+      - `GITHUB_TOTP_SECRET` — optional Base32 TOTP secret for 2FA.
+      - `CHROME_PATH` — optional path to the Chrome/Chromium binary (defaults to `/usr/bin/google-chrome`).
+      - `CHROME_PROFILE_DIR` — optional Chrome profile directory; when set to an existing logged‑in profile (e.g. `~/.config/google-chrome/Default`), the auth script SHOULD prefer validating that session instead of forcing a fresh login.
+
+- **Requirements**
+  - Before relying on Copilot Web in unattended runs, a project operator MUST:
+    - Run the enhanced auth helper once in a GUI or virtual display context (e.g., `xvfb-run` for headless CI) to establish a GitHub+Copilot session using the configured credentials.
+    - Use the validation helper to confirm the session is usable.
+  - Oracle’s browser engine MUST:
+    - Use the authenticated profile (as configured) when launching Chrome for Copilot runs.
+    - Avoid relying solely on raw cookie copying for GitHub auth; cookie sync may be used as a best‑effort helper, but the Playwright flow is the source of truth for establishing sessions.
+
+---
+
+## 4. Sessions, Slugs & Artifacts
 
 - **Sessions**
   - Every non‑preview run (API or browser) MUST create a session under:
@@ -66,7 +125,7 @@ This document is the single source of truth for how this Oracle fork is expected
 
 ---
 
-## 4. Diff Automation Contract (Browser Engine)
+## 5. Diff Automation Contract (Browser Engine)
 
 When a project agent opts into diff automation, Oracle MUST obey the following behavior:
 
@@ -237,3 +296,36 @@ Detached/background runs continue to rely on `result.json` and `session.json` in
     - Assembled review request → Copilot Web → response,
     - Applying accepted diffs via git,
     - Committing and pushing via `scripts/committer` so humans do not need to perform those steps manually.
+   - When Copilot returns unified diffs:
+     - Thoroughly read the response, decide which hunks are safe and appropriate, and apply only those diffs locally (never blindly apply everything).
+     - When the response is ambiguous or incomplete, run additional **browser rounds** with Copilot (by issuing follow‑up prompts derived from the same review context) to clarify intent or request corrections, then re‑evaluate and apply diffs as above.
+     - Respect the configured **max‑turns** limit (see below) when deciding how many follow‑ups to issue.
+
+---
+
+## 7. Copilot Review Rounds & max‑turns
+
+- **Round orchestration**
+  - Oracle MAY act as an “interaction agent” on top of the browser transport for Copilot review requests.
+  - In this mode, Oracle:
+    1. **Create code review request** – assemble a review prompt from a template (e.g. `docs/templates/COPILOT_REVIEW_REQUEST_EXAMPLE.md` or a repo‑specific variant such as `tmp/COPILOT_REVIEW_AUTH_SYSTEM.md`).
+    2. **Send to Copilot and await response** – deliver the prompt to Copilot Web via the browser engine (main `oracle` CLI with `--engine browser --copilot` or helper script such as `scripts/copilot-code-review.ts`) and wait for Copilot’s markdown reply.
+    3. **Read Copilot response and apply agreed‑upon diffs** – thoroughly read Copilot’s response, extract any unified diff blocks, and apply only those hunks that Oracle “concurs with” (correct paths, matches intent, passes validation).
+    4. **Ask clarifying questions if needed** – when the response is ambiguous, incomplete, or missing diffs, send a follow‑up list of clarifying questions back to Copilot within the same session and await the new response.
+    5. **Read follow‑up response and adjust code** – thoroughly read the follow‑up, extract and validate any new diffs, and make additional code changes when they are necessary and relevant for the requested review.
+
+- **max‑turns parameter**
+  - Browser‑driven Copilot review sessions MUST respect a configurable turn limit:
+    - Default limit: **3** turns (1 initial request + up to 2 follow‑ups) unless overridden.
+    - CLI integrations SHOULD expose a flag such as `--copilot-max-turns <n>` (and helper scripts MAY accept `--max-turns <n>`) to allow project agents to raise or lower this cap.
+  - Oracle MUST:
+    - Track how many Copilot prompts have been sent for a given review session.
+    - Stop issuing new follow‑ups once the max‑turns limit is reached, even if further clarification would be useful.
+    - Surface in logs/session JSON how many turns were used and whether the limit was hit.
+
+- **Model selection in Copilot rounds**
+  - The existing `--model` flag continues to control which GPT‑5 family model Oracle aims at, even for Copilot:
+    - `--model gpt-5.1` SHOULD target the **“GPT‑5”** picker entry in the ChatGPT/Copilot UI.
+    - `--model gpt-5-pro` SHOULD target **“GPT‑5 Pro”** when available.
+    - Descriptive labels (e.g. `--model "GPT-5 Instant"`) MAY be passed through as explicit overrides when the UI exposes such variants.
+  - Helper scripts (e.g. `scripts/copilot-code-review.ts`) SHOULD accept a `--model <name>` argument and map it to the appropriate browser model label so that Copilot review rounds run against the intended GPT‑5 variant.

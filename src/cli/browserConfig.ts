@@ -8,7 +8,8 @@ const DEFAULT_CHROME_PROFILE = 'Default';
 
 const BROWSER_MODEL_LABELS: Record<ModelName, string> = {
   'gpt-5-pro': 'GPT-5 Pro',
-  'gpt-5.1': 'ChatGPT 5.1',
+  // ChatGPT’s picker currently labels the `gpt-5.1` family as “GPT-5”.
+  'gpt-5.1': 'GPT-5',
 };
 
 export interface BrowserFlagOptions {

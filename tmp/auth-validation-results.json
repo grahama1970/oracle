@@ -1,0 +1,26 @@
+{
+  "timestamp": "2025-11-17T14:44:31.135Z",
+  "profile": "/home/graham/.oracle/chrome-profile",
+  "checks": {
+    "github": {
+      "authenticated": true,
+      "url": "https://github.com/",
+      "evidence": "Found sign-out link or profile indicators",
+      "status": "✅ VALID"
+    },
+    "copilot": {
+      "accessible": true,
+      "hasChatInput": false,
+      "isMarketingPage": false,
+      "isAuthWall": false,
+      "pageTitle": "New chat · GitHub Copilot",
+      "url": "https://github.com/copilot?tab=chat",
+      "status": "✅ CHAT READY"
+    }
+  },
+  "status": {
+    "overall": "✅ VALID",
+    "canUseOracle": true,
+    "summary": "Ready for Oracle automation"
+  }
+}

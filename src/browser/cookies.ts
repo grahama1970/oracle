@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { COOKIE_URLS } from './constants.js';
 import type { BrowserLogger, ChromeClient, CookieParam, ChromeCookiesSecureModule, PuppeteerCookie } from './types.js';
@@ -51,9 +52,10 @@ async function readChromeCookies(url: string, profile?: string | null): Promise<
   const chromeModule = await loadChromeCookiesModule();
   const urlsToCheck = Array.from(new Set([stripQuery(url), ...COOKIE_URLS]));
   const merged = new Map<string, CookieParam>();
+  const resolvedProfile = resolveChromeProfile(profile ?? undefined);
   for (const candidateUrl of urlsToCheck) {
     let rawCookies: unknown;
-    rawCookies = await chromeModule.getCookiesPromised(candidateUrl, 'puppeteer', profile ?? undefined);
+    rawCookies = await chromeModule.getCookiesPromised(candidateUrl, 'puppeteer', resolvedProfile);
     if (!Array.isArray(rawCookies)) {
       continue;
     }
@@ -70,6 +72,41 @@ async function readChromeCookies(url: string, profile?: string | null): Promise<
     }
   }
   return Array.from(merged.values());
+}
+
+/**
+ * The chrome-cookies-secure module expects a profile directory that contains
+ * a `Cookies` database file. When callers pass a *user data dir* (like
+ * `/path/to/chrome-profile`) instead of a specific profile such as
+ * `/path/to/chrome-profile/Default`, cookie lookup fails with
+ * "Path: <dir>/Cookies not found".
+ *
+ * To make this more forgiving, if the provided path does not contain a
+ * `Cookies` file but a `Default/Cookies` file exists, we automatically
+ * switch to that nested Default profile.
+ */
+function resolveChromeProfile(profile?: string): string | undefined {
+  if (!profile) {
+    return undefined;
+  }
+  // If this looks like a bare profile name (e.g., "Default"), leave it alone.
+  const looksLikePath = profile.includes('/') || profile.includes('\\');
+  if (!looksLikePath) {
+    return profile;
+  }
+
+  const directCookies = path.join(profile, 'Cookies');
+  if (existsSync(directCookies)) {
+    return profile;
+  }
+
+  const defaultProfile = path.join(profile, 'Default');
+  const defaultCookies = path.join(defaultProfile, 'Cookies');
+  if (existsSync(defaultCookies)) {
+    return defaultProfile;
+  }
+
+  return profile;
 }
 
 function normalizeCookie(cookie: PuppeteerCookie, fallbackHost: string): CookieParam | null {
