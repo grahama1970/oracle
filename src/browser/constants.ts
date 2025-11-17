@@ -24,6 +24,51 @@ export const ANSWER_SELECTORS = [
   '[data-message-author-role="assistant"]',
 ];
 
+// Copilot-specific DOM scopes for assistant markdown and responses. Keeping
+// them centralized avoids scattering selector drift fixes across modules.
+export const COPILOT_MARKDOWN_SELECTORS = [
+  // Exact markdown body for the latest assistant turn (observed 2025-11-17).
+  'div.ChatMessage-module__content--sWQll > div.markdown-body.MarkdownRenderer-module__container--dNKcF.MarkdownViewer-module__markdownOverrides--xtpOl[data-copilot-markdown="true"]',
+  // Slightly looser but still scoped to markdown bodies Copilot renders.
+  'div.markdown-body.MarkdownRenderer-module__container--dNKcF.MarkdownViewer-module__markdownOverrides--xtpOl[data-copilot-markdown="true"]',
+  'div.markdown-body.MarkdownRenderer-module__container--dNKcF[data-copilot-markdown="true"]',
+  'div.markdown-body[data-copilot-markdown="true"]',
+  'div.markdown-body',
+];
+
+// Latest assistant message container in Copilot (use exact class chain to avoid sidebar matches).
+export const COPILOT_MESSAGE_SELECTOR =
+  [
+    // Exact hashed class chain (latest assistant turn)
+    'div.message-container.ChatMessage-module__chatMessage--mrG0f.ChatMessage-module__ai--l6YpD.ChatMessage-module__latest--AGxtS',
+    // Fallback hashed-tolerant match for future class hash rotations
+    'div.message-container[class*="ChatMessage-module__chatMessage"][class*="ChatMessage-module__ai"][class*="ChatMessage-module__latest"]',
+  ].join(', ');
+
+// Direct markdown body inside the assistant message container (exact match first, then fall back to COPILOT_MARKDOWN_SELECTORS).
+export const COPILOT_MARKDOWN_BODY_SELECTOR =
+  'div.ChatMessage-module__content--sWQll > div.markdown-body.MarkdownRenderer-module__container--dNKcF.MarkdownViewer-module__markdownOverrides--xtpOl[data-copilot-markdown="true"]';
+
+// Copilot send/stop button with data-loading flag (used as typing indicator).
+export const COPILOT_LOADING_BUTTON_SELECTOR =
+  'button.prc-Button-ButtonBase-c50BI.prc-Button-IconButton-szpyj[data-component="IconButton"][data-loading], button[data-component="IconButton"][data-loading]';
+
+// Optional: stop/loading icon inside the send button.
+export const COPILOT_STOP_ICON_SELECTOR = 'svg.octicon-square-fill';
+export const COPILOT_SEND_ICON_SELECTOR = 'svg.octicon-paper-airplane';
+
+// Copilot conversation container to scope queries away from the sidebar.
+export const COPILOT_CONVERSATION_SCOPE_SELECTOR =
+  'div.ConversationView-module__container--XaY36 div.ImmersiveChat-module__messageContent--JE3f_, div.ConversationView-module__container--XaY36 div.ImmersiveChat-module__messageContent';
+
+export const COPILOT_RESPONSE_SELECTORS = [
+  '[data-qa*="copilot-answer"]',
+  '[data-testid*="copilot-response"]',
+  '.copilot-answer',
+  '.copilot-response',
+  '[data-skip-answer="true"]',
+];
+
 export const CONVERSATION_TURN_SELECTOR = 'article[data-testid^="conversation-turn"]';
 export const ASSISTANT_ROLE_SELECTOR = '[data-message-author-role="assistant"]';
 export const CLOUDFLARE_SCRIPT_SELECTOR = 'script[src*="/challenge-platform/"]';

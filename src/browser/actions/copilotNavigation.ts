@@ -4,6 +4,15 @@
 
 import type { ChromeClient, BrowserLogger } from '../types.js';
 import { delay } from '../utils.js';
+import {
+  COPILOT_MARKDOWN_SELECTORS,
+  COPILOT_MESSAGE_SELECTOR,
+  COPILOT_MARKDOWN_BODY_SELECTOR,
+  COPILOT_LOADING_BUTTON_SELECTOR,
+  COPILOT_CONVERSATION_SCOPE_SELECTOR,
+  COPILOT_STOP_ICON_SELECTOR,
+  COPILOT_SEND_ICON_SELECTOR,
+} from '../constants.js';
 
 /**
  * Navigate to GitHub Copilot and ensure we're on the right page
@@ -208,84 +217,96 @@ export async function waitForCopilotResponse(
   logger('Waiting for Copilot response...');
   const started = Date.now();
 
-  // Try different selectors for Copilot responses
-  const responseSelectors = [
-    '[data-qa*="copilot-answer"]',
-    '[data-testid*="copilot-response"]',
-    '.copilot-answer',
-    '.copilot-response',
-    '[data-skip-answer="true"]' // possible internal property
-  ];
+  // We mirror the ChatGPT "wait until stable" behavior: poll a small snapshot
+  // (isTyping + markdown text) and only capture once it stabilizes.
+  const pollIntervalMs = 600;
+  const requiredStableCycles = 4;
+  let stableCycles = 0;
+  let lastText = '';
+  let baselineText: string | null = null;
+  let seenNewText = false;
 
-  let lastContent = '';
-  let sameContentCount = 0;
-  const requiredStabilization = 3;
+  const markdownSelectorList = COPILOT_MARKDOWN_SELECTORS.join(', ');
+  const snapshotExpr = `(() => {
+    // Scope to the conversation area to avoid sidebar noise. If missing,
+    // fall back to the document but only when a matching message exists.
+    const scope = document.querySelector('${COPILOT_CONVERSATION_SCOPE_SELECTOR}') || document;
 
-  while (Date.now() - started < timeoutMs) {
-    const result = await Runtime.evaluate({
-      expression: `(() => {
-        // Prefer the Copilot markdown container when available; it holds the
-        // assistant's rendered markdown without sidebar chrome.
-        const markdownRoot = document.querySelector('div.markdown-body.MarkdownRenderer-module__container--dNKcF[data-copilot-markdown="true"]') ||
-          document.querySelector('div.markdown-body[data-copilot-markdown="true"]');
+    // Prefer the latest assistant message container within the scope.
+    const msgCandidates = Array.from(
+      scope.querySelectorAll('${COPILOT_MESSAGE_SELECTOR}')
+    );
+    const latestMsg = msgCandidates.at(-1) || null;
 
-        const scope = markdownRoot || document;
-        const candidateEls = scope.querySelectorAll('${responseSelectors.join(', ')}');
-        let text = '';
-        let html = '';
+    const markdownRoot = latestMsg
+      ? (latestMsg.querySelector('${COPILOT_MARKDOWN_BODY_SELECTOR}') ||
+         Array.from(latestMsg.querySelectorAll('${markdownSelectorList}')).at(-1) ||
+         null)
+      : null;
 
-        if (candidateEls.length > 0) {
-          // Use the first matching element
-          const el = candidateEls[0];
-          text = el.innerText || el.textContent || '';
-          html = el.innerHTML;
-        } else {
-          // Fallback: try markdown from last div containing code blocks (likely GitHub markdown)
-          const lastDiv = scope.querySelector('div .markdown-recirculation:last-of-type, div[class*="markdown"]:not(:empty):last-of-type');
-          if (lastDiv) {
-            text = lastDiv.innerText || lastDiv.textContent || '';
-            html = lastDiv.innerHTML;
-          }
-        }
-
-        const isTyping = scope.querySelector('.animate-something, .pulse, [data-working="true"]') !== null;
-
-        return {
-          text: text.trim(),
-          html: html,
-          chars: text.trim().length,
-          isTyping: isTyping
-        };
-      })()`,
-      returnByValue: true
-    });
-
-    const res = result.result.value;
-
-    if (!res.isTyping && res.chars > 0) {
-      // Stabilization check
-      if (!lastContent || res.text !== lastContent) {
-        lastContent = res.text;
-        sameContentCount = 0;
-      } else {
-        sameContentCount++;
-      }
-
-      if (sameContentCount >= requiredStabilization) {
-        logger('Copilot response complete ✓');
-        return {
-          text: res.text,
-          html: res.html
-        };
-      }
+    // If we can't find a markdown body, return empty to avoid pulling sidebar noise.
+    if (!markdownRoot) {
+      return { text: '', html: '', isTyping: true, chars: 0 };
     }
 
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    const text = (markdownRoot.innerText || '').trim();
+    const html = markdownRoot.innerHTML || '';
+
+    // Typing detection hierarchy (Copilot):
+    // 1) data-loading="true" on the send/stop button
+    // 2) stop/loading icon visible inside that button
+    // 3) generic spinners as a fallback
+    const loadingBtn = document.querySelector('${COPILOT_LOADING_BUTTON_SELECTOR}');
+    const stopIconVisible = Boolean(document.querySelector('${COPILOT_STOP_ICON_SELECTOR}'));
+    const sendIconVisible = Boolean(document.querySelector('${COPILOT_SEND_ICON_SELECTOR}'));
+    const loadingAttr = loadingBtn?.getAttribute('data-loading');
+    const isTyping = Boolean(
+      (loadingAttr && loadingAttr !== 'false') ||
+      stopIconVisible ||
+      (!sendIconVisible && loadingBtn && loadingBtn.getAttribute('aria-disabled') === 'true') ||
+      document.querySelector('[data-working="true"], .animate-spin, [aria-label*="loading"], [data-testid*="typing"]')
+    );
+
+    return { text, html, isTyping, chars: text.length };
+  })()`;
+
+  while (Date.now() - started < timeoutMs) {
+    const snapResult = await Runtime.evaluate({ expression: snapshotExpr, returnByValue: true });
+    const snap = snapResult.result?.value || {};
+    const text: string = typeof snap.text === 'string' ? snap.text : '';
+    const html: string = typeof snap.html === 'string' ? snap.html : '';
+    const isTyping: boolean = Boolean(snap.isTyping);
+
+    // Record the first observed text as the baseline so we don't capture
+    // pre-existing sidebar or stale assistant content. Only consider
+    // completion after we detect text that differs from this baseline.
+    if (baselineText === null) {
+      baselineText = text;
+    }
+
+    if (!seenNewText && text && baselineText !== null && text !== baselineText) {
+      seenNewText = true;
+    }
+
+    if (!isTyping && text.length > 0 && seenNewText) {
+      if (text === lastText) {
+        stableCycles += 1;
+      } else {
+        lastText = text;
+        stableCycles = 0;
+      }
+      if (stableCycles >= requiredStableCycles) {
+        logger('Copilot response complete ✓');
+        return { text, html };
+      }
+    } else {
+      stableCycles = 0;
+      lastText = text || lastText;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
   }
 
   logger('Copilot response timeout');
-  return {
-    text: '',
-    html: null
-  };
+  return { text: '', html: null };
 }

@@ -7,7 +7,7 @@
 
 ## Repository and branch
 
-- **Repo:** `steipete/oracle`
+- **Repo:** `grahama1970/oracle`
 - **Branch:** `feat/copilot-auth-review`
 - **Paths of interest:**
   - `scripts/authenticate-github-enhanced.ts`
@@ -159,10 +159,26 @@ Copilot’s job is to:
 
 ## Deliverable
 
-Reply with:
+Your entire reply MUST be a single markdown document with **exactly two
+sections in this order**:
 
-- A single fenced code block containing a unified diff that meets the
-  constraints above (you may include multiple file hunks inside the same
-  patch), and
-- Answers to the clarifying questions above, written outside of the diff
-  block so they are easy to review.
+1. `## Patch`
+   - Immediately under this heading, include **one** fenced ` ```diff` code
+     block containing the unified diff that meets the constraints above
+     (you may include multiple file hunks inside that single block).
+   - Do **not** include any other text before or after the code block in
+     this section.
+
+2. `## Clarifying answers`
+   - Under this heading, provide your answers to Clarifying questions 1–3 as
+     a short markdown list or numbered list.
+   - Do **not** include any additional commentary, links, or patch content
+     in this section.
+
+Additional rules:
+
+- Do **not** ask me to paste file contents, push branches, or share permalinks;
+  you already have access to the repository `grahama1970/oracle` on branch
+  `feat/copilot-auth-review` and the paths of interest listed above.
+- Do **not** add any text before `## Patch` or after `## Clarifying answers`.
+- Do **not** emit more than one ` ```diff` block.

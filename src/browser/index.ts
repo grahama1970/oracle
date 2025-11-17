@@ -199,26 +199,32 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
     answerText = answer.text;
     answerHtml = answer.html ?? '';
 
-    const copiedMarkdown = await withRetries(
-      async () => {
-        const attempt = await captureAssistantMarkdown(Runtime, answer.meta, logger);
-        if (!attempt) {
-          throw new Error('copy-missing');
-        }
-        return attempt;
-      },
-      {
-        retries: 2,
-  delayMs: 350,
-        onRetry: (attempt, error) => {
-if (options.verbose) {
-logger(
-           `[retry] Markdown capture attempt ${attempt + 1}: ${error instanceof Error ? error.message : error}`,
-     );
+    let copiedMarkdown: string | null = null;
+    if (target === 'copilot') {
+      // Copilot pages do not expose a reliable copy button; use the stabilized text/html snapshot.
+      copiedMarkdown = answerText || answerHtml || null;
+    } else {
+      copiedMarkdown = await withRetries(
+        async () => {
+          const attempt = await captureAssistantMarkdown(Runtime, answer.meta, logger);
+          if (!attempt) {
+            throw new Error('copy-missing');
           }
+          return attempt;
         },
-      },
-    ).catch(() => null);
+        {
+          retries: 2,
+          delayMs: 350,
+          onRetry: (attempt, error) => {
+            if (options.verbose) {
+              logger(
+                `[retry] Markdown capture attempt ${attempt + 1}: ${error instanceof Error ? error.message : error}`,
+              );
+            }
+          },
+        },
+      ).catch(() => null);
+    }
     answerMarkdown = copiedMarkdown ?? answerText;
     stopThinkingMonitor?.();
     stopSnapshotMonitor?.();
