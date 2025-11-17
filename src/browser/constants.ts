@@ -60,7 +60,12 @@ export const COPILOT_SEND_ICON_SELECTOR = 'svg.octicon-paper-airplane';
 
 // Copilot conversation container to scope queries away from the sidebar.
 export const COPILOT_CONVERSATION_SCOPE_SELECTOR =
-  'div.ConversationView-module__container--XaY36 div.ImmersiveChat-module__messageContent--JE3f_, div.ConversationView-module__container--XaY36 div.ImmersiveChat-module__messageContent';
+  [
+    'div.ConversationView-module__container--XaY36 div.ImmersiveChat-module__messageContent--JE3f_',
+    'div.ConversationView-module__container--XaY36 div.ImmersiveChat-module__messageContent',
+    // Fallback: chat thread region used by some Copilot layouts
+    '[data-testid="chat-thread"]',
+  ].join(', ');
 
 export const COPILOT_RESPONSE_SELECTORS = [
   '[data-qa*="copilot-answer"]',

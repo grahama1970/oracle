@@ -261,9 +261,10 @@ export async function waitForCopilotResponse(
     const rawText = (markdownRoot.innerText || '').trim();
     const html = markdownRoot.innerHTML || '';
 
-    // 4) NAV/CHROME GUARD: If the text contains obvious sidebar/navigation strings, ignore and wait.
-    const NAV_TERMS = ['New chat', 'Manage chat', 'Agents'];
-    const containsNav = NAV_TERMS.some(t => rawText.includes(t));
+    // 4) NAV/CHROME GUARD: If the text contains obvious sidebar/navigation strings or is huge,
+    // force waiting to avoid capturing sidebar/history chrome.
+    const containsNav = /Toggle sidebar|New chat|Manage chat|Agents|Quick links|Spaces|SparkPreview/i.test(rawText);
+    const tooLarge = rawText.length > 5000;
 
     // Typing/done detection (Copilot-specific): read the toolbar button state.
     const toolbarButton =
@@ -295,13 +296,13 @@ export async function waitForCopilotResponse(
       isTyping = true;
     }
 
-    // If the snapshot looks like chrome (sidebar strings), force waiting.
-    const text = containsNav ? '' : rawText;
-    if (containsNav) {
+    // If the snapshot looks like chrome or is excessively large, force waiting.
+    const text = (containsNav || tooLarge) ? '' : rawText;
+    if (containsNav || tooLarge) {
       isTyping = true;
     }
 
-    return { text, html: containsNav ? '' : html, isTyping, chars: text.length };
+    return { text, html: (containsNav || tooLarge) ? '' : html, isTyping, chars: text.length };
   })()`;
 
   while (Date.now() - started < timeoutMs) {
