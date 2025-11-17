@@ -254,7 +254,7 @@ export async function waitForCopilotResponse(
 
     // If we can't find a markdown body, keep waiting.
     if (!markdownRoot) {
-      return { text: '', html: '', isTyping: true, chars: 0 };
+      return { text: '', html: '', isTyping: true, chars: 0, hasMarkdown: false };
     }
 
     // Extract ONLY the markdown body content.
@@ -302,7 +302,16 @@ export async function waitForCopilotResponse(
       isTyping = true;
     }
 
-    return { text, html: (containsNav || tooLarge) ? '' : html, isTyping, chars: text.length };
+    return {
+      text,
+      html: (containsNav || tooLarge) ? '' : html,
+      isTyping,
+      chars: text.length,
+      hasMarkdown: true,
+      hasAirplane,
+      loadingAttr,
+      hasStopIcon,
+    };
   })()`;
 
   while (Date.now() - started < timeoutMs) {
@@ -311,6 +320,9 @@ export async function waitForCopilotResponse(
     const text: string = typeof snap.text === 'string' ? snap.text : '';
     const html: string = typeof snap.html === 'string' ? snap.html : '';
     const isTyping: boolean = Boolean(snap.isTyping);
+    const hasMarkdown: boolean = Boolean((snap as any).hasMarkdown);
+    const hasAirplane: boolean = Boolean((snap as any).hasAirplane);
+    const loadingAttr: string | null = typeof (snap as any).loadingAttr === 'string' ? (snap as any).loadingAttr : null;
 
     // Record the first observed text as the baseline so we don't capture
     // pre-existing sidebar or stale assistant content. Only consider
@@ -319,11 +331,12 @@ export async function waitForCopilotResponse(
       baselineText = text;
     }
 
-    if (!seenNewText && text && baselineText !== null && text !== baselineText) {
+    if (!seenNewText && hasMarkdown && text && baselineText !== null && text.length > baselineText.length) {
       seenNewText = true;
     }
 
-    if (!isTyping && text.length > 0 && seenNewText) {
+    const uiDone = hasAirplane && (!loadingAttr || loadingAttr === 'false');
+    if (!isTyping && uiDone && hasMarkdown && text.length > 0 && seenNewText) {
       if (text === lastText) {
         stableCycles += 1;
       } else {
