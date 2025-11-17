@@ -37,13 +37,14 @@ export const COPILOT_MARKDOWN_SELECTORS = [
 ];
 
 // Latest assistant message container in Copilot (use exact class chain to avoid sidebar matches).
-export const COPILOT_MESSAGE_SELECTOR =
-  [
-    // Exact hashed class chain (latest assistant turn)
-    'div.message-container.ChatMessage-module__chatMessage--mrG0f.ChatMessage-module__ai--l6YpD.ChatMessage-module__latest--AGxtS',
-    // Fallback hashed-tolerant match for future class hash rotations
-    'div.message-container[class*="ChatMessage-module__chatMessage"][class*="ChatMessage-module__ai"][class*="ChatMessage-module__latest"]',
-  ].join(', ');
+export const COPILOT_MESSAGE_SELECTORS = [
+  // Exact hashed class chain (latest assistant turn)
+  'div.message-container.ChatMessage-module__chatMessage--mrG0f.ChatMessage-module__ai--l6YpD.ChatMessage-module__latest--AGxtS',
+  // Fallback: any assistant message (keep hashed classes but drop latest)
+  'div.message-container.ChatMessage-module__chatMessage--mrG0f.ChatMessage-module__ai--l6YpD',
+  // Hash-tolerant match for future rotations
+  'div.message-container[class*="ChatMessage-module__chatMessage"][class*="ChatMessage-module__ai"]',
+];
 
 // Direct markdown body inside the assistant message container (exact match first, then fall back to COPILOT_MARKDOWN_SELECTORS).
 export const COPILOT_MARKDOWN_BODY_SELECTOR =

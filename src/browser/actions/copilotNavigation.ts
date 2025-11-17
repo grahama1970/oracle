@@ -6,7 +6,7 @@ import type { ChromeClient, BrowserLogger } from '../types.js';
 import { delay } from '../utils.js';
 import {
   COPILOT_MARKDOWN_SELECTORS,
-  COPILOT_MESSAGE_SELECTOR,
+  COPILOT_MESSAGE_SELECTORS,
   COPILOT_MARKDOWN_BODY_SELECTOR,
   COPILOT_LOADING_BUTTON_SELECTOR,
   COPILOT_CONVERSATION_SCOPE_SELECTOR,
@@ -234,9 +234,16 @@ export async function waitForCopilotResponse(
       return { text: '', html: '', isTyping: true, chars: 0 };
     }
 
-    // Find the latest assistant message INSIDE the scope only.
-    const msgCandidates = Array.from(scope.querySelectorAll('${COPILOT_MESSAGE_SELECTOR}'));
-    const latestMsg = msgCandidates.length ? msgCandidates[msgCandidates.length - 1] : null;
+    // Find the latest assistant message INSIDE the scope only, trying multiple selectors for drift.
+    const selectors = ${JSON.stringify(COPILOT_MESSAGE_SELECTORS)};
+    let latestMsg = null;
+    for (const sel of selectors) {
+      const found = Array.from(scope.querySelectorAll(sel));
+      if (found.length) {
+        latestMsg = found[found.length - 1];
+        break;
+      }
+    }
     if (!latestMsg || !scope.contains(latestMsg)) {
       return { text: '', html: '', isTyping: true, chars: 0 };
     }
@@ -275,7 +282,13 @@ export async function waitForCopilotResponse(
     // Done when airplane icon shown AND data-loading falsy.
     const isDoneIcon = hasAirplane && (!loadingAttr || loadingAttr === 'false');
 
-    return { text, html, isTyping: isTyping && !isDoneIcon, chars: text.length };
+    // Guard against accidental huge captures: if text is extremely long and
+    // contains obvious navigation chrome (e.g., repeated "New chat"), treat
+    // it as still typing so we skip it.
+    const looksLikeNav = text.length > 5000 && /New chat\s+Manage chat/i.test(text);
+    const safeTyping = isTyping || looksLikeNav;
+
+    return { text, html, isTyping: safeTyping && !isDoneIcon, chars: text.length };
   })()`;
 
   while (Date.now() - started < timeoutMs) {
