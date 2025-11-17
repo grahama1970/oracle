@@ -219,8 +219,9 @@ export async function waitForCopilotResponse(
 
   // We mirror the ChatGPT "wait until stable" behavior: poll a small snapshot
   // (isTyping + markdown text) and only capture once it stabilizes.
-  const pollIntervalMs = 500;
-  const requiredStableCycles = 3;
+  // Keep polling snappy, but require a couple of stable cycles.
+  const pollIntervalMs = 400;
+  const requiredStableCycles = 2;
   let stableCycles = 0;
   let lastText = '';
   let baselineText: string | null = null;
@@ -228,13 +229,13 @@ export async function waitForCopilotResponse(
 
   const markdownSelectorList = COPILOT_MARKDOWN_SELECTORS.join(', ');
   const snapshotExpr = `(() => {
-    // STRICT scoping: never fall back to document to avoid sidebar/history.
+    // 1) STRICT SCOPE: Only look inside the conversation container. Never fall back to document.
     const scope = document.querySelector('${COPILOT_CONVERSATION_SCOPE_SELECTOR}');
     if (!scope) {
       return { text: '', html: '', isTyping: true, chars: 0 };
     }
 
-    // Find the latest assistant message INSIDE the scope only, trying multiple selectors for drift.
+    // 2) LATEST ASSISTANT TURN: Only consider the last assistant message inside scope.
     const selectors = ${JSON.stringify(COPILOT_MESSAGE_SELECTORS)};
     let latestMsg = null;
     for (const sel of selectors) {
@@ -248,17 +249,21 @@ export async function waitForCopilotResponse(
       return { text: '', html: '', isTyping: true, chars: 0 };
     }
 
-    // Only accept markdown bodies explicitly marked as Copilot markdown.
-    const preferred = latestMsg.querySelector('${COPILOT_MARKDOWN_BODY_SELECTOR}');
-    const fallbackList = preferred ? [] : Array.from(latestMsg.querySelectorAll('${markdownSelectorList}'));
-    const markdownRoot = preferred || (fallbackList.length ? fallbackList[fallbackList.length - 1] : null);
+    // 3) MARKDOWN BODY: Only accept the explicit Copilot markdown body within that message.
+    const markdownRoot = latestMsg.querySelector('${COPILOT_MARKDOWN_BODY_SELECTOR}');
+
+    // If we can't find a markdown body, keep waiting.
     if (!markdownRoot) {
       return { text: '', html: '', isTyping: true, chars: 0 };
     }
 
-    // Extract ONLY the innerText/HTML of the markdown body.
-    const text = (markdownRoot.innerText || '').trim();
+    // Extract ONLY the markdown body content.
+    const rawText = (markdownRoot.innerText || '').trim();
     const html = markdownRoot.innerHTML || '';
+
+    // 4) NAV/CHROME GUARD: If the text contains obvious sidebar/navigation strings, ignore and wait.
+    const NAV_TERMS = ['New chat', 'Manage chat', 'Agents'];
+    const containsNav = NAV_TERMS.some(t => rawText.includes(t));
 
     // Typing/done detection (Copilot-specific): read the toolbar button state.
     const toolbarButton =
@@ -277,18 +282,26 @@ export async function waitForCopilotResponse(
       svgClass.includes('octicon-square-fill') || /stop/i.test(svgAria) ||
       Boolean(document.querySelector('${COPILOT_STOP_ICON_SELECTOR}'));
 
-    // In progress iff data-loading truthy OR stop icon present.
-    const isTyping = Boolean((loadingAttr && loadingAttr !== 'false') || hasStopIcon);
-    // Done when airplane icon shown AND data-loading falsy.
-    const isDoneIcon = hasAirplane && (!loadingAttr || loadingAttr === 'false');
+    // 5) PROGRESS/DONE RULES:
+    // - In progress iff data-loading truthy OR stop icon present.
+    // - Done iff airplane icon present AND data-loading falsy.
+    // - If neither icon found, keep waiting (treat as typing).
+    let isTyping = true;
+    if ((loadingAttr && loadingAttr !== 'false') || hasStopIcon) {
+      isTyping = true;
+    } else if (hasAirplane && (!loadingAttr || loadingAttr === 'false')) {
+      isTyping = false;
+    } else {
+      isTyping = true;
+    }
 
-    // Guard against accidental huge captures: if text is extremely long and
-    // contains obvious navigation chrome (e.g., repeated "New chat"), treat
-    // it as still typing so we skip it.
-    const looksLikeNav = text.length > 5000 && /New chat\s+Manage chat/i.test(text);
-    const safeTyping = isTyping || looksLikeNav;
+    // If the snapshot looks like chrome (sidebar strings), force waiting.
+    const text = containsNav ? '' : rawText;
+    if (containsNav) {
+      isTyping = true;
+    }
 
-    return { text, html, isTyping: safeTyping && !isDoneIcon, chars: text.length };
+    return { text, html: containsNav ? '' : html, isTyping, chars: text.length };
   })()`;
 
   while (Date.now() - started < timeoutMs) {
