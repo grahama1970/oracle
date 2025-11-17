@@ -252,22 +252,29 @@ export async function waitForCopilotResponse(
     const text = (markdownRoot.innerText || '').trim();
     const html = markdownRoot.innerHTML || '';
 
-    // Typing detection hierarchy (Copilot):
-    // 1) data-loading="true" on the send/stop button
-    // 2) stop/loading icon visible inside that button
-    // 3) generic spinners as a fallback
-    const loadingBtn = document.querySelector('${COPILOT_LOADING_BUTTON_SELECTOR}');
-    const stopIconVisible = Boolean(document.querySelector('${COPILOT_STOP_ICON_SELECTOR}'));
-    const sendIconVisible = Boolean(document.querySelector('${COPILOT_SEND_ICON_SELECTOR}'));
-    const loadingAttr = loadingBtn?.getAttribute('data-loading');
+    // Typing/done detection (Copilot-specific):
+    // Prefer the chat toolbar send/stop button and its icon state.
+    const toolbarButton = document.querySelector('div.ConversationView-module__footer--xr6HB form div.ChatInput-module__toolbarButtons--YDoIY > button')
+      || document.querySelector('${COPILOT_LOADING_BUTTON_SELECTOR}');
+
+    const loadingAttr = toolbarButton?.getAttribute('data-loading');
+    const svg = toolbarButton?.querySelector('svg');
+    const svgClass = svg?.getAttribute('class') || '';
+    const svgAria = svg?.getAttribute('aria-label') || '';
+
+    const hasAirplane = svgClass.includes('octicon-paper-airplane') || /paper.?airplane/i.test(svgAria);
+    const hasStopIcon = svgClass.includes('octicon-square-fill') || /stop/i.test(svgAria) || Boolean(document.querySelector('${COPILOT_STOP_ICON_SELECTOR}'));
+
+    // Still generating if data-loading is truthy or stop icon is shown.
     const isTyping = Boolean(
       (loadingAttr && loadingAttr !== 'false') ||
-      stopIconVisible ||
-      (!sendIconVisible && loadingBtn && loadingBtn.getAttribute('aria-disabled') === 'true') ||
-      document.querySelector('[data-working="true"], .animate-spin, [aria-label*="loading"], [data-testid*="typing"]')
+      hasStopIcon
     );
 
-    return { text, html, isTyping, chars: text.length };
+    // Explicit done: airplane icon present AND no loading attribute.
+    const isDoneIcon = hasAirplane && (!loadingAttr || loadingAttr === 'false');
+
+    return { text, html, isTyping: isTyping && !isDoneIcon, chars: text.length };
   })()`;
 
   while (Date.now() - started < timeoutMs) {

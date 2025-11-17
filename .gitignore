@@ -8,3 +8,9 @@ dist/
 build/
 *.tsbuildinfo
 tsconfig.tsbuildinfo
+
+# CLI / Copilot run artifacts (keep tracked prompt templates under tmp/)
+tmp/*.log
+tmp/*-run*.log
+tmp/auth-validation-results.json
+tmp/copilot-review-*.log
