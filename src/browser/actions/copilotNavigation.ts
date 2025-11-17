@@ -219,8 +219,8 @@ export async function waitForCopilotResponse(
 
   // We mirror the ChatGPT "wait until stable" behavior: poll a small snapshot
   // (isTyping + markdown text) and only capture once it stabilizes.
-  const pollIntervalMs = 600;
-  const requiredStableCycles = 4;
+  const pollIntervalMs = 500;
+  const requiredStableCycles = 3;
   let stableCycles = 0;
   let lastText = '';
   let baselineText: string | null = null;
@@ -228,50 +228,51 @@ export async function waitForCopilotResponse(
 
   const markdownSelectorList = COPILOT_MARKDOWN_SELECTORS.join(', ');
   const snapshotExpr = `(() => {
-    // Scope to the conversation area to avoid sidebar noise. If missing,
-    // fall back to the document but only when a matching message exists.
-    const scope = document.querySelector('${COPILOT_CONVERSATION_SCOPE_SELECTOR}') || document;
+    // STRICT scoping: never fall back to document to avoid sidebar/history.
+    const scope = document.querySelector('${COPILOT_CONVERSATION_SCOPE_SELECTOR}');
+    if (!scope) {
+      return { text: '', html: '', isTyping: true, chars: 0 };
+    }
 
-    // Prefer the latest assistant message container within the scope.
-    const msgCandidates = Array.from(
-      scope.querySelectorAll('${COPILOT_MESSAGE_SELECTOR}')
-    );
-    const latestMsg = msgCandidates.at(-1) || null;
+    // Find the latest assistant message INSIDE the scope only.
+    const msgCandidates = Array.from(scope.querySelectorAll('${COPILOT_MESSAGE_SELECTOR}'));
+    const latestMsg = msgCandidates.length ? msgCandidates[msgCandidates.length - 1] : null;
+    if (!latestMsg || !scope.contains(latestMsg)) {
+      return { text: '', html: '', isTyping: true, chars: 0 };
+    }
 
-    const markdownRoot = latestMsg
-      ? (latestMsg.querySelector('${COPILOT_MARKDOWN_BODY_SELECTOR}') ||
-         Array.from(latestMsg.querySelectorAll('${markdownSelectorList}')).at(-1) ||
-         null)
-      : null;
-
-    // If we can't find a markdown body, return empty to avoid pulling sidebar noise.
+    // Only accept markdown bodies explicitly marked as Copilot markdown.
+    const preferred = latestMsg.querySelector('${COPILOT_MARKDOWN_BODY_SELECTOR}');
+    const fallbackList = preferred ? [] : Array.from(latestMsg.querySelectorAll('${markdownSelectorList}'));
+    const markdownRoot = preferred || (fallbackList.length ? fallbackList[fallbackList.length - 1] : null);
     if (!markdownRoot) {
       return { text: '', html: '', isTyping: true, chars: 0 };
     }
 
+    // Extract ONLY the innerText/HTML of the markdown body.
     const text = (markdownRoot.innerText || '').trim();
     const html = markdownRoot.innerHTML || '';
 
-    // Typing/done detection (Copilot-specific):
-    // Prefer the chat toolbar send/stop button and its icon state.
-    const toolbarButton = document.querySelector('div.ConversationView-module__footer--xr6HB form div.ChatInput-module__toolbarButtons--YDoIY > button')
-      || document.querySelector('${COPILOT_LOADING_BUTTON_SELECTOR}');
+    // Typing/done detection (Copilot-specific): read the toolbar button state.
+    const toolbarButton =
+      document.querySelector('div.ConversationView-module__footer--xr6HB form div.ChatInput-module__toolbarButtons--YDoIY > button') ||
+      document.querySelector('${COPILOT_LOADING_BUTTON_SELECTOR}');
 
     const loadingAttr = toolbarButton?.getAttribute('data-loading');
     const svg = toolbarButton?.querySelector('svg');
     const svgClass = svg?.getAttribute('class') || '';
     const svgAria = svg?.getAttribute('aria-label') || '';
 
-    const hasAirplane = svgClass.includes('octicon-paper-airplane') || /paper.?airplane/i.test(svgAria);
-    const hasStopIcon = svgClass.includes('octicon-square-fill') || /stop/i.test(svgAria) || Boolean(document.querySelector('${COPILOT_STOP_ICON_SELECTOR}'));
+    const hasAirplane =
+      svgClass.includes('octicon-paper-airplane') || /paper.?airplane/i.test(svgAria) ||
+      Boolean(document.querySelector('${COPILOT_SEND_ICON_SELECTOR}'));
+    const hasStopIcon =
+      svgClass.includes('octicon-square-fill') || /stop/i.test(svgAria) ||
+      Boolean(document.querySelector('${COPILOT_STOP_ICON_SELECTOR}'));
 
-    // Still generating if data-loading is truthy or stop icon is shown.
-    const isTyping = Boolean(
-      (loadingAttr && loadingAttr !== 'false') ||
-      hasStopIcon
-    );
-
-    // Explicit done: airplane icon present AND no loading attribute.
+    // In progress iff data-loading truthy OR stop icon present.
+    const isTyping = Boolean((loadingAttr && loadingAttr !== 'false') || hasStopIcon);
+    // Done when airplane icon shown AND data-loading falsy.
     const isDoneIcon = hasAirplane && (!loadingAttr || loadingAttr === 'false');
 
     return { text, html, isTyping: isTyping && !isDoneIcon, chars: text.length };
