@@ -223,11 +223,11 @@ export async function waitForCopilotResponse(
   const pollIntervalMs = 400;
   const requiredStableCycles = 2;
   const softCompleteAfterMs = 45_000;
-const fallbackAfterMs = 30_000;
-const minCharsForLongAnswer = 800;
-const longAnswerStableCycles = 1;
-const earlyUiDoneFallbackMs = 8_000;
-const minCharsForEarlyExit = 400;
+  const fallbackAfterMs = 30_000;
+  const minCharsForLongAnswer = 800;
+  const longAnswerStableCycles = 1;
+  const earlyUiDoneFallbackMs = 8_000;
+  const minCharsForEarlyExit = 400;
 let stableCycles = 0;
   let lastText = '';
   let baselineText = '';
@@ -402,11 +402,21 @@ let stableCycles = 0;
       stableCycles += 1;
     }
 
-    if (!isTyping && uiDone && hasMarkdown && confirmText.length > 0 && !navRegex.test(confirmText)) {
+    if (!isTyping && uiDone && hasMarkdown && confirmText.length > 0) {
+      // If UI shows "done" and we have any markdown, exit immediately to avoid hangs.
+      logger('Copilot response complete ✓ (UI done / markdown present)');
+      return { text: confirmText || text, html };
+
       const enoughStableCycles =
         chars >= minCharsForLongAnswer
           ? stableCycles >= longAnswerStableCycles
           : stableCycles >= requiredStableCycles;
+
+      // If UI shows "done" and we have non-empty markdown, exit immediately.
+      if (chars >= minCharsForEarlyExit) {
+        logger('Copilot response complete ✓ (UI done immediate)');
+        return { text: confirmText, html };
+      }
 
       // UI reports done + non-empty markdown: bail out immediately to avoid hangs.
       if (stableCycles === 0 && elapsed > 2_000) {
