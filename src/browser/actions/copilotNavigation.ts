@@ -223,11 +223,12 @@ export async function waitForCopilotResponse(
   const pollIntervalMs = 400;
   const requiredStableCycles = 2;
   const softCompleteAfterMs = 45_000;
-  const fallbackAfterMs = 30_000;
-  const minCharsForLongAnswer = 800;
-  const longAnswerStableCycles = 1;
-  const earlyUiDoneFallbackMs = 8_000;
-  let stableCycles = 0;
+const fallbackAfterMs = 30_000;
+const minCharsForLongAnswer = 800;
+const longAnswerStableCycles = 1;
+const earlyUiDoneFallbackMs = 8_000;
+const minCharsForEarlyExit = 400;
+let stableCycles = 0;
   let lastText = '';
   let baselineText = '';
   let seenNewText = false;
@@ -407,6 +408,12 @@ export async function waitForCopilotResponse(
           ? stableCycles >= longAnswerStableCycles
           : stableCycles >= requiredStableCycles;
 
+      // UI reports done + non-empty markdown: bail out immediately to avoid hangs.
+      if (stableCycles === 0 && elapsed > 2_000) {
+        logger('Copilot response complete ✓ (UI done immediate)');
+        return { text: confirmText, html };
+      }
+
       // Heuristic: if the text contains explicit patch markers, accept sooner.
       if (patchMarkersPresent && (stableCycles >= 1 || elapsed > earlyUiDoneFallbackMs)) {
         logger('Copilot snapshot stabilized (patch markers)');
@@ -430,7 +437,7 @@ export async function waitForCopilotResponse(
 
       // Safety valve: if UI says done and we have non-empty markdown,
       // do not wait indefinitely for perfect stability.
-      if (elapsed > 20_000 && chars > 50) {
+      if (elapsed > 15_000 && chars > minCharsForEarlyExit) {
         logger('Copilot response complete ✓ (early exit after UI done)');
         return { text: confirmText, html };
       }
