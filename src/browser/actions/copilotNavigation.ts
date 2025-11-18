@@ -263,7 +263,7 @@ export async function waitForCopilotResponse(
 
     // 4) NAV/CHROME GUARD: If the text contains obvious sidebar/navigation strings or is huge,
     // force waiting to avoid capturing sidebar/history chrome.
-    const containsNav = /Toggle sidebar|New chat|Manage chat|Agents|Quick links|Spaces|SparkPreview/i.test(rawText);
+    const containsNav = /Toggle sidebar|New chat|Manage chat|Agents|Quick links|Spaces|SparkPreview|Open workbench|WorkBench|Share/ i.test(rawText);
     const tooLarge = rawText.length > 5000;
 
     // Typing/done detection (Copilot-specific): read the toolbar button state.
@@ -336,7 +336,10 @@ export async function waitForCopilotResponse(
     }
 
     const uiDone = hasAirplane && (!loadingAttr || loadingAttr === 'false');
-    if (!isTyping && uiDone && hasMarkdown && text.length > 0 && seenNewText) {
+    // Double-check snapshot: if nav words remain or markdown missing in the same turn, keep waiting.
+    const looksLikeChrome = /Toggle sidebar|New chat|Manage chat|Agents|Quick links|Spaces|SparkPreview|Open workbench|WorkBench|Share/i.test(text);
+
+    if (!isTyping && uiDone && hasMarkdown && text.length > 0 && seenNewText && !looksLikeChrome) {
       if (text === lastText) {
         stableCycles += 1;
       } else {
@@ -356,5 +359,6 @@ export async function waitForCopilotResponse(
   }
 
   logger('Copilot response timeout');
+  // Fail closed: do not return sidebar chrome as a "response".
   return { text: '', html: null };
 }
