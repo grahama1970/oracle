@@ -118,6 +118,10 @@ async function main() {
   };
 
   try {
+    const tmpDir = path.join(process.cwd(), 'tmp');
+    await mkdir(tmpDir, { recursive: true });
+    const slug = path.basename(resolvedTemplatePath).replace(/\.[^.]+$/, '') || 'copilot-review';
+
     console.log(
       `Starting Copilot code-review run with template:\n  ${resolvedTemplatePath}\n  (length: ${prompt.length} chars)`,
     );
@@ -145,30 +149,33 @@ async function main() {
       console.log('\n--- Copilot Response (truncated preview) ---');
       console.log(`${answer.slice(0, 800)}${answer.length > 800 ? '\n…' : ''}`);
 
-      const extraction = extractUnifiedDiff(answer);
-      const diffText = extraction.selectedBlock;
-      const isUnifiedDiff = diffText ? isValidUnifiedDiff(diffText, false) : false;
-      const isPatchLike =
-        !isUnifiedDiff &&
-        !!diffText &&
-        (diffText.includes('*** Begin Patch') || diffText.includes('*** Update File:'));
-      const hasDiff = Boolean(isUnifiedDiff || isPatchLike);
+      let patch: string | undefined;
+      let patchPath: string | undefined;
+      try {
+        const extraction = extractUnifiedDiff(answer);
+        patch = extraction.selectedBlock;
 
-      if (hasDiff && diffText) {
-        lastDiff = diffText;
-        const tmpDir = path.join(process.cwd(), 'tmp');
-        await mkdir(tmpDir, { recursive: true });
-        const patchPath = path.join(tmpDir, `copilot-review-turn-${turn}.patch`);
-        await writeFile(patchPath, diffText, 'utf8');
-        if (isUnifiedDiff) {
-          console.log(`\n[oracle] Extracted unified diff for round ${turn} -> ${patchPath}`);
-        } else if (isPatchLike) {
-          console.log(
-            `\n[oracle] Extracted patch-like block for round ${turn} -> ${patchPath} (not a git unified diff)`,
-          );
+        if (!patch) {
+          const noDiffPath = path.join(tmpDir, `${slug}-copilot-review-no-diff.txt`);
+          await writeFile(noDiffPath, answer, 'utf8');
+          console.log(`[oracle] No diff found; wrote ${noDiffPath}`);
+          break;
         }
 
-        if (applyMode !== 'none' && isUnifiedDiff) {
+        const isUnifiedDiff = isValidUnifiedDiff(patch, true);
+        if (!isUnifiedDiff) {
+          const invalidPath = path.join(tmpDir, `${slug}-copilot-review-invalid-diff.txt`);
+          await writeFile(invalidPath, answer, 'utf8');
+          console.log(`[oracle] Diff failed strict validation; wrote ${invalidPath}`);
+          break;
+        }
+
+        patchPath = path.join(tmpDir, `${slug}-copilot-review-turn-${turn}.patch`);
+        await writeFile(patchPath, patch, 'utf8');
+        console.log(`\n[oracle] Extracted unified diff for round ${turn} -> ${patchPath}`);
+        lastDiff = patch;
+
+        if (applyMode !== 'none') {
           const gitRoot = process.cwd();
           ensureGitRoot(gitRoot);
           const validation = validatePatch(patchPath, gitRoot);
@@ -186,13 +193,13 @@ async function main() {
               console.log('[oracle] Patch applied successfully (--apply-mode=apply).');
             }
           }
-        } else if (applyMode !== 'none' && isPatchLike) {
-          console.log(
-            '[oracle] Patch-like block is not a git unified diff; skipping git apply for this round.',
-          );
         }
-      } else {
-        console.log('\n[oracle] No valid unified diff found in this response.');
+      } catch (err) {
+        const invalidPath = path.join(tmpDir, `${slug}-copilot-review-invalid-diff.txt`);
+        await writeFile(invalidPath, answer, 'utf8');
+        const msg = err instanceof Error ? err.message : String(err);
+        console.log(`[oracle] Failed to extract a valid diff: ${msg}; wrote ${invalidPath}`);
+        break;
       }
 
       if (turn >= maxTurns) {

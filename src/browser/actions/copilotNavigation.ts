@@ -223,8 +223,20 @@ export async function waitForCopilotResponse(
   const pollIntervalMs = 400;
   const requiredStableCycles = 2;
   const softCompleteAfterMs = 45_000;
+  const fallbackAfterMs = 30_000;
+  const minCharsForLongAnswer = 800;
+  const longAnswerStableCycles = 1;
   let stableCycles = 0;
   let lastText = '';
+  let baselineText = '';
+  let seenNewText = false;
+  let lastChangeAt = started;
+  let lastSnapshot: { text: string; html: string; isTyping: boolean; chars: number } = {
+    text: '',
+    html: '',
+    isTyping: true,
+    chars: 0,
+  };
 
   const markdownSelectorList = COPILOT_MARKDOWN_SELECTORS.join(', ');
   const snapshotExpr = `(() => {
@@ -260,10 +272,24 @@ export async function waitForCopilotResponse(
     const rawText = (markdownRoot.innerText || '').trim();
     const html = markdownRoot.innerHTML || '';
 
-    // 4) NAV/CHROME GUARD: If the text contains obvious sidebar/navigation strings or is huge,
-    // force waiting to avoid capturing sidebar/history chrome.
-    const containsNav = /Toggle sidebar|New chat|Manage chat|Agents|Quick links|Spaces|SparkPreview|Open workbench|WorkBench|Share/ i.test(rawText);
     const tooLarge = rawText.length > 5000;
+    const containsNav =
+      /Toggle sidebar|New chat|Manage chat|Agents|Quick links|Spaces|SparkPreview|Open workbench|WorkBench|Share/i.test(rawText);
+
+    // Strip obvious nav chrome but preserve the answer if stripping removes everything.
+    const cleanedText = rawText
+      .replace(/Toggle sidebar/gi, '')
+      .replace(/New chat/gi, '')
+      .replace(/Manage chat/gi, '')
+      .replace(/Agents/gi, '')
+      .replace(/Quick links/gi, '')
+      .replace(/Spaces/gi, '')
+      .replace(/SparkPreview/gi, '')
+      .replace(/Open workbench/gi, '')
+      .replace(/WorkBench/gi, '')
+      .replace(/Share/gi, '')
+      .trim();
+    const text = cleanedText.length > 0 ? cleanedText : rawText;
 
     // Typing/done detection (Copilot-specific): read the toolbar button state.
     const toolbarButton =
@@ -295,12 +321,6 @@ export async function waitForCopilotResponse(
       isTyping = true;
     }
 
-    // If the snapshot looks like chrome or is excessively large, force waiting.
-    const text = (containsNav || tooLarge) ? '' : rawText;
-    if (containsNav || tooLarge) {
-      isTyping = true;
-    }
-
     return {
       text,
       html: (containsNav || tooLarge) ? '' : html,
@@ -310,6 +330,7 @@ export async function waitForCopilotResponse(
       hasAirplane,
       loadingAttr,
       hasStopIcon,
+      containsNav,
     };
   })()`;
 
@@ -321,6 +342,8 @@ export async function waitForCopilotResponse(
     const text: string = typeof snap.text === 'string' ? snap.text : '';
     const html: string = typeof snap.html === 'string' ? snap.html : '';
     let isTyping: boolean = Boolean(snap.isTyping);
+    const chars: number = Number.isFinite((snap as any).chars) ? Number((snap as any).chars) : text.length;
+    const containsNav: boolean = Boolean((snap as any).containsNav);
     const hasMarkdown: boolean = Boolean((snap as any).hasMarkdown);
     const hasAirplane: boolean = Boolean((snap as any).hasAirplane);
     const loadingAttr: string | null = typeof (snap as any).loadingAttr === 'string' ? (snap as any).loadingAttr : null;
@@ -363,16 +386,32 @@ export async function waitForCopilotResponse(
       logger(`waitForCopilotResponse: observed long Copilot answer (~${confirmText.length} chars)`);
     }
 
+    // Track meaningful changes to the assistant response.
+    if (text && text !== baselineText) {
+      baselineText = text;
+      seenNewText = true;
+      stableCycles = 0;
+      lastChangeAt = Date.now();
+      lastSnapshot = { text, html, isTyping, chars };
+    } else if (seenNewText) {
+      stableCycles += 1;
+    }
+
     if (!isTyping && uiDone && hasMarkdown && confirmText.length > 0 && !navRegex.test(confirmText)) {
-      if (confirmText === lastText) {
-        stableCycles += 1;
-      } else {
-        lastText = confirmText;
-        stableCycles = 0;
-      }
-      if (stableCycles >= requiredStableCycles) {
+      const enoughStableCycles =
+        chars >= minCharsForLongAnswer
+          ? stableCycles >= longAnswerStableCycles
+          : stableCycles >= requiredStableCycles;
+
+      if (enoughStableCycles) {
         logger('Copilot snapshot stabilized');
         logger('Copilot response complete ✓');
+        return { text: confirmText, html };
+      }
+      // Safety valve: if UI says done and we have non-empty markdown,
+      // do not wait indefinitely for perfect stability.
+      if (elapsed > 20_000 && chars > 50) {
+        logger('Copilot response complete ✓ (early exit after UI done)');
         return { text: confirmText, html };
       }
     } else {
@@ -393,6 +432,15 @@ export async function waitForCopilotResponse(
       );
       logger('Copilot response complete ✓');
       return { text: confirmText, html };
+    }
+
+    if (seenNewText && elapsed >= fallbackAfterMs && elapsed - lastChangeAt >= fallbackAfterMs / 3 && lastSnapshot.text) {
+      logger(
+        'Copilot response fallback: using latest assistant markdown after stability timeout',
+        { elapsedMs: elapsed, chars: lastSnapshot.chars },
+      );
+      logger('Copilot response complete ✓ (fallback)');
+      return { text: lastSnapshot.text, html: lastSnapshot.html };
     }
 
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
