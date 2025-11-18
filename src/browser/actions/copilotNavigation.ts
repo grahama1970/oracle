@@ -222,10 +222,9 @@ export async function waitForCopilotResponse(
   // Keep polling snappy, but require a couple of stable cycles.
   const pollIntervalMs = 400;
   const requiredStableCycles = 2;
+  const softCompleteAfterMs = 45_000;
   let stableCycles = 0;
   let lastText = '';
-  let baselineText: string | null = null;
-  let seenNewText = false;
 
   const markdownSelectorList = COPILOT_MARKDOWN_SELECTORS.join(', ');
   const snapshotExpr = `(() => {
@@ -314,26 +313,17 @@ export async function waitForCopilotResponse(
     };
   })()`;
 
+  let firstLongAnswerAt: number | null = null;
+
   while (Date.now() - started < timeoutMs) {
     const snapResult = await Runtime.evaluate({ expression: snapshotExpr, returnByValue: true });
     const snap = snapResult.result?.value || {};
     const text: string = typeof snap.text === 'string' ? snap.text : '';
     const html: string = typeof snap.html === 'string' ? snap.html : '';
-    const isTyping: boolean = Boolean(snap.isTyping);
+    let isTyping: boolean = Boolean(snap.isTyping);
     const hasMarkdown: boolean = Boolean((snap as any).hasMarkdown);
     const hasAirplane: boolean = Boolean((snap as any).hasAirplane);
     const loadingAttr: string | null = typeof (snap as any).loadingAttr === 'string' ? (snap as any).loadingAttr : null;
-
-    // Record the first observed text as the baseline so we don't capture
-    // pre-existing sidebar or stale assistant content. Only consider
-    // completion after we detect text that differs from this baseline.
-    if (baselineText === null) {
-      baselineText = text;
-    }
-
-    if (!seenNewText && hasMarkdown && text && baselineText !== null && text.length > baselineText.length) {
-      seenNewText = true;
-    }
 
     const uiDone = hasAirplane && (!loadingAttr || loadingAttr === 'false');
     const navRegex = /Toggle sidebar|New chat|Manage chat|Agents|Quick links|Spaces|SparkPreview|Open workbench|WorkBench|Share/i;
@@ -366,21 +356,43 @@ export async function waitForCopilotResponse(
       }
     }
 
-    if (!isTyping && uiDone && hasMarkdown && confirmText.length > 0 && seenNewText && !navRegex.test(confirmText)) {
-      if (text === lastText) {
+    const elapsed = Date.now() - started;
+
+    if (confirmText.length > 800 && !firstLongAnswerAt) {
+      firstLongAnswerAt = Date.now();
+      logger(`waitForCopilotResponse: observed long Copilot answer (~${confirmText.length} chars)`);
+    }
+
+    if (!isTyping && uiDone && hasMarkdown && confirmText.length > 0 && !navRegex.test(confirmText)) {
+      if (confirmText === lastText) {
         stableCycles += 1;
       } else {
-        lastText = text;
+        lastText = confirmText;
         stableCycles = 0;
       }
       if (stableCycles >= requiredStableCycles) {
         logger('Copilot snapshot stabilized');
         logger('Copilot response complete ✓');
-        return { text, html };
+        return { text: confirmText, html };
       }
     } else {
       stableCycles = 0;
-      lastText = text || lastText;
+      lastText = confirmText || lastText;
+    }
+
+    if (
+      firstLongAnswerAt &&
+      elapsed - firstLongAnswerAt >= softCompleteAfterMs &&
+      confirmText &&
+      !navRegex.test(confirmText)
+    ) {
+      logger(
+        `Copilot response fallback: using latest assistant markdown after ${Math.round(
+          (elapsed - firstLongAnswerAt) / 1000,
+        )}s without strict stability`,
+      );
+      logger('Copilot response complete ✓');
+      return { text: confirmText, html };
     }
 
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));

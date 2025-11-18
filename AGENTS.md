@@ -53,6 +53,10 @@ Shared guardrails distilled from the various `~/Projects/*/AGENTS.md` files (sta
 - If you get stuck, consult external references (web search, official docs, Stack Overflow, etc.) before escalating, and record any insights you find for the next agent.
 - Keep any polling or progress loops bounded to protect hang detectors and make it obvious when something stalls.
 
+### Browser / DOM Debugging
+- For any `--engine browser` or Copilot change, follow `docs/browser-debug-checklist.md` instead of treating the DOM as opaque.
+- Use `pnpm tsx scripts/browser-tools.ts inspect` / `eval` to probe live DOM state for ChatGPT/Copilot tabs launched by Oracle, and only then update selectors or stabilization heuristics.
+
 ### Stack-Specific Reminders
 - Start background builders or watchers using the automation provided by the repo (daemon scripts, tmux-based dev servers, etc.) instead of running binaries directly.
 - Use the official CLI wrappers for browser automation, screenshotting, or MCP interactions rather than crafting new ad-hoc scripts.

@@ -73,6 +73,8 @@ export interface BrowserRunResult {
   chromePort?: number;
   userDataDir?: string;
   snapshots?: string[];
+  // Optional platform hint (e.g., "chatgpt" or "copilot") for debugging.
+  platform?: string;
 }
 
 export type DiffRunStatus =

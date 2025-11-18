@@ -100,8 +100,9 @@ async function main() {
     timeoutMs: 900_000,
     inputTimeoutMs: 30_000,
     cookieSync: true,
-    headless: true,
-    keepBrowser: false,
+    // Headful debug mode for Copilot POC so we can inspect the DOM.
+    headless: false,
+    keepBrowser: true,
     hideWindow: false,
     // Target the GPT-5/GPT-5 Pro picker labels for browser runs.
     desiredModel,

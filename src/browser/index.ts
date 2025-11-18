@@ -25,7 +25,6 @@ import {
 } from './pageActions.js';
 import { estimateTokenCount, withRetries } from './utils.js';
 import { formatElapsed } from '../oracle/format.js';
-import { integrateCopilotLogic } from './copilotIntegration.js';
 
 export type { BrowserAutomationConfig, BrowserRunOptions, BrowserRunResult } from './types.js';
 export { CHATGPT_URL, DEFAULT_MODEL_TARGET } from './constants.js';
