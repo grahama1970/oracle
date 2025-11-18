@@ -336,10 +336,37 @@ export async function waitForCopilotResponse(
     }
 
     const uiDone = hasAirplane && (!loadingAttr || loadingAttr === 'false');
-    // Double-check snapshot: if nav words remain or markdown missing in the same turn, keep waiting.
-    const looksLikeChrome = /Toggle sidebar|New chat|Manage chat|Agents|Quick links|Spaces|SparkPreview|Open workbench|WorkBench|Share/i.test(text);
+    const navRegex = /Toggle sidebar|New chat|Manage chat|Agents|Quick links|Spaces|SparkPreview|Open workbench|WorkBench|Share/i;
+    const looksLikeChrome = navRegex.test(text) || text.length > 5000;
 
-    if (!isTyping && uiDone && hasMarkdown && text.length > 0 && seenNewText && !looksLikeChrome) {
+    // Double-check by re-reading markdown once UI says done.
+    let confirmText = text;
+    if (!looksLikeChrome && uiDone && hasMarkdown) {
+      const confirm = await Runtime.evaluate({
+        expression: `(() => {
+          const scope = document.querySelector('${COPILOT_CONVERSATION_SCOPE_SELECTOR}');
+          if (!scope) return '';
+          const selectors = ${JSON.stringify(COPILOT_MESSAGE_SELECTORS)};
+          let latest = null;
+          for (const sel of selectors) {
+            const found = Array.from(scope.querySelectorAll(sel));
+            if (found.length) { latest = found.at(-1); break; }
+          }
+          if (!latest || !scope.contains(latest)) return '';
+          const md = latest.querySelector('${COPILOT_MARKDOWN_BODY_SELECTOR}');
+          if (!md) return '';
+          return (md.innerText || '').trim();
+        })()`,
+        returnByValue: true,
+      });
+      confirmText = typeof confirm.result?.value === 'string' ? (confirm.result.value as string) : '';
+      if (navRegex.test(confirmText) || confirmText.length === 0) {
+        // Treat as still typing to avoid capturing chrome.
+        isTyping = true;
+      }
+    }
+
+    if (!isTyping && uiDone && hasMarkdown && confirmText.length > 0 && seenNewText && !navRegex.test(confirmText)) {
       if (text === lastText) {
         stableCycles += 1;
       } else {
