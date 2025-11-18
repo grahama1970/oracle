@@ -132,6 +132,7 @@ async function main() {
     let currentPrompt = prompt;
     let turn = 0;
     let lastDiff: string | undefined;
+    let hasDiff = false;
 
     while (turn < maxTurns) {
       turn += 1;
@@ -151,6 +152,7 @@ async function main() {
 
       let patch: string | undefined;
       let patchPath: string | undefined;
+      hasDiff = false;
       try {
         const extraction = extractUnifiedDiff(answer);
         patch = extraction.selectedBlock;
@@ -174,6 +176,7 @@ async function main() {
         await writeFile(patchPath, patch, 'utf8');
         console.log(`\n[oracle] Extracted unified diff for round ${turn} -> ${patchPath}`);
         lastDiff = patch;
+        hasDiff = true;
 
         if (applyMode !== 'none') {
           const gitRoot = process.cwd();

@@ -226,6 +226,7 @@ export async function waitForCopilotResponse(
   const fallbackAfterMs = 30_000;
   const minCharsForLongAnswer = 800;
   const longAnswerStableCycles = 1;
+  const earlyUiDoneFallbackMs = 8_000;
   let stableCycles = 0;
   let lastText = '';
   let baselineText = '';
@@ -380,6 +381,9 @@ export async function waitForCopilotResponse(
     }
 
     const elapsed = Date.now() - started;
+    const patchMarkersPresent = /(\*\*\*\s*Begin Patch|diff --git|@@ -\d+,\d+ \+\d+,\d+ @@|```diff|```patch)/i.test(
+      confirmText,
+    );
 
     if (confirmText.length > 800 && !firstLongAnswerAt) {
       firstLongAnswerAt = Date.now();
@@ -403,11 +407,27 @@ export async function waitForCopilotResponse(
           ? stableCycles >= longAnswerStableCycles
           : stableCycles >= requiredStableCycles;
 
+      // Heuristic: if the text contains explicit patch markers, accept sooner.
+      if (patchMarkersPresent && (stableCycles >= 1 || elapsed > earlyUiDoneFallbackMs)) {
+        logger('Copilot snapshot stabilized (patch markers)');
+        logger('Copilot response complete ✓ (early patch heuristic)');
+        return { text: confirmText, html };
+      }
+
+      // Standard stability path.
       if (enoughStableCycles) {
         logger('Copilot snapshot stabilized');
         logger('Copilot response complete ✓');
         return { text: confirmText, html };
       }
+
+      // Inactivity fallback: UI done + no changes for a while.
+      if (elapsed - lastChangeAt > earlyUiDoneFallbackMs / 2 && chars > 100) {
+        logger('Copilot snapshot stabilized (inactivity)');
+        logger('Copilot response complete ✓ (inactivity fallback)');
+        return { text: confirmText, html };
+      }
+
       // Safety valve: if UI says done and we have non-empty markdown,
       // do not wait indefinitely for perfect stability.
       if (elapsed > 20_000 && chars > 50) {
