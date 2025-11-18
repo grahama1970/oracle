@@ -374,6 +374,7 @@ export async function waitForCopilotResponse(
         stableCycles = 0;
       }
       if (stableCycles >= requiredStableCycles) {
+        logger('Copilot snapshot stabilized');
         logger('Copilot response complete ✓');
         return { text, html };
       }

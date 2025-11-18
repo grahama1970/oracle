@@ -149,8 +149,10 @@ When a project agent opts into diff automation, Oracle MUST obey the following b
       - `diffReason` when no block is selected (e.g., `no_fenced_blocks`, `partial_fence`).
 
 - **Validation**
-  - At minimum, any selected diff MUST:
+  - At minimum, any selected diff (after Oracle has normalized the assistant’s markdown into a canonical patch form) MUST:
     - Contain at least one `diff --git a/... b/...` header.
+  - The raw browser UI response is **not** required to be a deterministic `git apply` patch:
+    - Oracle MAY parse patch‑like formats (e.g., `*** Begin Patch` / `*** Update File` blocks, or ` ```patch ` fences) from the generated markdown and synthesize a unified diff that satisfies the above constraints before validation and application.
     - Contain at least one numeric hunk header.
   - When `--strict-diff` is set, Oracle MUST also:
     - Require that each `diff --git` header parses into `aPath` and `bPath`.
@@ -290,7 +292,7 @@ Detached/background runs continue to rely on `result.json` and `session.json` in
 
 - **Oracle (this fork)**
   - Reliably deliver prompts + files to the chosen UI (ChatGPT, Copilot, etc.).
-  - Capture responses and, when requested, extract, validate, and optionally apply/commit diffs.
+  - Capture responses and, when requested, parse the generated markdown (including clarifying questions and any patch‑like blocks), then extract, normalize, validate, and optionally apply/commit diffs that Oracle concurs with.
   - Manage sessions, logs, JSON artifacts, and exit codes according to this contract.
   - For the Copilot‑centric workflow, own the end‑to‑end automation for:
     - Assembled review request → Copilot Web → response,
@@ -309,8 +311,8 @@ Detached/background runs continue to rely on `result.json` and `session.json` in
   - Oracle MAY act as an “interaction agent” on top of the browser transport for Copilot review requests.
   - In this mode, Oracle:
     1. **Create code review request** – assemble a review prompt from a template (e.g. `docs/templates/COPILOT_REVIEW_REQUEST_EXAMPLE.md` or a repo‑specific variant such as `tmp/COPILOT_REVIEW_AUTH_SYSTEM.md`).
-    2. **Send to Copilot and await response** – deliver the prompt to Copilot Web via the browser engine (main `oracle` CLI with `--engine browser --copilot` or helper script such as `scripts/copilot-code-review.ts`) and wait for Copilot’s markdown reply.
-    3. **Read Copilot response and apply agreed‑upon diffs** – thoroughly read Copilot’s response, extract any unified diff blocks, and apply only those hunks that Oracle “concurs with” (correct paths, matches intent, passes validation).
+    2. **Send to Copilot and await response** – deliver the prompt to Copilot Web via the browser engine (main `oracle` CLI with `--engine browser --copilot` or helper script such as `scripts/copilot-code-review.ts`) and wait for Copilot’s markdown reply, persisting it as a generated markdown artifact for downstream agents.
+    3. **Read Copilot response and apply agreed‑upon diffs** – thoroughly read the persisted markdown response (clarifying questions + patch proposals), parse any unified‑diff‑like or patch‑style blocks, normalize them into a canonical unified diff, and apply only those hunks that Oracle “concurs with” (correct paths, matches intent, passes validation).
     4. **Ask clarifying questions if needed** – when the response is ambiguous, incomplete, or missing diffs, send a follow‑up list of clarifying questions back to Copilot within the same session and await the new response.
     5. **Read follow‑up response and adjust code** – thoroughly read the follow‑up, extract and validate any new diffs, and make additional code changes when they are necessary and relevant for the requested review.
 
