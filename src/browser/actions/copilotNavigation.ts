@@ -14,6 +14,8 @@ import {
   COPILOT_SEND_ICON_SELECTOR,
 } from '../constants.js';
 
+const COPILOT_CHAT_URL = 'https://github.com/copilot?tab=chat';
+
 /**
  * Navigate to GitHub Copilot and ensure we're on the right page
  */
@@ -24,11 +26,14 @@ export async function navigateToCopilot(
 ) {
   logger('Navigating to GitHub Copilot...');
 
-  await Page.navigate({ url: 'https://github.com/copilot/' });
+  await Page.navigate({ url: COPILOT_CHAT_URL });
 
   // Wait for page load and authentication check
   await Page.loadEventFired();
   await delay(2000); // Extra delay for Copilot interface initialization
+
+  await dismissCopilotAnnouncementModal(Runtime, logger);
+  await ensureCopilotChatTab(Runtime, logger);
 
   // Check if we're on the right page and authenticated
   const isAuthenticated = await checkCopilotAuthentication(Runtime, logger);
@@ -167,6 +172,61 @@ export async function ensureCopilotPromptReady(
   return null;
 }
 
+async function dismissCopilotAnnouncementModal(Runtime: ChromeClient['Runtime'], logger: BrowserLogger): Promise<void> {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const { result } = await Runtime.evaluate({
+      expression: `(() => {
+        const modal = document.querySelector('[data-testid="product-announcement-modal"]');
+        if (!modal) return false;
+        const close = modal.querySelector('button[aria-label="Close modal"], button[aria-label="Close"], button.octicon-x');
+        if (close) {
+          close.click();
+          return true;
+        }
+        return false;
+      })()`,
+      returnByValue: true,
+    });
+    if (result?.value) {
+      logger('Closed Copilot announcement modal');
+      break;
+    }
+    await delay(250);
+  }
+}
+
+async function ensureCopilotChatTab(Runtime: ChromeClient['Runtime'], logger: BrowserLogger): Promise<void> {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const { result } = await Runtime.evaluate({
+      expression: `(() => {
+        const url = window.location.href;
+        const hasChat = !!document.querySelector('#copilot-chat-textarea, [data-testid="chat-thread"]');
+        if (url.includes('/copilot?tab=chat') || hasChat) {
+          return { ready: true };
+        }
+        const tab = document.querySelector('a[href="/copilot?tab=chat"], a[href="https://github.com/copilot?tab=chat"], button[data-component="SegmentedControlButton"][value="chat"], button[aria-label*="Chat"][data-selected]');
+        if (tab) {
+          tab.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+          return { switched: true };
+        }
+        return { switched: false };
+      })()`,
+      returnByValue: true,
+    });
+    const value = (result?.value ?? {}) as { ready?: boolean; switched?: boolean };
+    if (value.ready) {
+      return;
+    }
+    if (value.switched) {
+      logger('Switching Copilot into chat tab…');
+      await delay(600);
+      continue;
+    }
+    await delay(300);
+  }
+  logger('Warning: Could not confirm Copilot chat tab; continuing anyway');
+}
+
 /**
  * Wait for Copilot response ready (not typing/fetching)
  */
@@ -228,7 +288,7 @@ export async function waitForCopilotResponse(
   const longAnswerStableCycles = 1;
   const earlyUiDoneFallbackMs = 8_000;
   const minCharsForEarlyExit = 400;
-let stableCycles = 0;
+  let stableCycles = 0;
   let lastText = '';
   let baselineText = '';
   let seenNewText = false;
@@ -240,99 +300,135 @@ let stableCycles = 0;
     chars: 0,
   };
 
-  const markdownSelectorList = COPILOT_MARKDOWN_SELECTORS.join(', ');
   const snapshotExpr = `(() => {
-    // 1) STRICT SCOPE: Only look inside the conversation container. Never fall back to document.
-    const scope = document.querySelector('${COPILOT_CONVERSATION_SCOPE_SELECTOR}');
-    if (!scope) {
-      return { text: '', html: '', isTyping: true, chars: 0 };
-    }
+    // NEW SNAPSHOT LOGIC: Always return the last non-empty markdown body
 
-    // 2) LATEST ASSISTANT TURN: Only consider the last assistant message inside scope.
-    const selectors = ${JSON.stringify(COPILOT_MESSAGE_SELECTORS)};
-    let latestMsg = null;
-    for (const sel of selectors) {
-      const found = Array.from(scope.querySelectorAll(sel));
-      if (found.length) {
-        latestMsg = found[found.length - 1];
+    // 1) Try scoped selection first (original logic)
+    let scopedText = '';
+    let scopedHtml = '';
+    let scopeFound = false;
+    let latestFound = false;
+
+    // Original scoped snapshot attempt remains as first choice
+    const scopeSelectors = [
+      '[data-testid="chat-thread"]',
+      'div[data-conversation]',
+      '.chat-input-wrapper',
+      'div[data-testid="chat-input-wrapper"]',
+      'div[data-copilot-chat-input]',
+      'div.ConversationView-module__container--XaY36 div.ImmersiveChat-module__messageContent--JE3f_'
+    ];
+
+    let scope = null;
+    for (const sel of scopeSelectors) {
+      scope = document.querySelector(sel);
+      if (scope) {
+        scopeFound = true;
         break;
       }
     }
-    if (!latestMsg || !scope.contains(latestMsg)) {
-      return { text: '', html: '', isTyping: true, chars: 0 };
+
+    let latestMsg = null;
+    if (scope) {
+      const assistantSelectors = [
+        'div.message-container[class*="ChatMessage"][class*="ai" i]',
+        'div[class*="assistant" i]',
+        '[data-copilot-message="assistant"]',
+        '[data-message-role="assistant"]'
+      ];
+
+      for (const sel of assistantSelectors) {
+        const found = Array.from(scope.querySelectorAll(sel));
+        if (found.length) {
+          latestMsg = found.at(-1);
+          latestFound = true;
+          break;
+        }
+      }
+
+      if (latestMsg) {
+        const md = latestMsg.querySelector('div.markdown-body[data-copilot-markdown], div.markdown-body, .markdown');
+        if (md && md.innerText?.trim()) {
+          const cleaned = md.innerText.replace(/Toggle sidebar|New chat|Manage chat|Agents|Quick links|Spaces|SparkPreview|Open workbench|WorkBench|Share/gi, '').trim();
+          scopedText = cleaned.length > 0 ? cleaned : md.innerText;
+          scopedHtml = md.innerHTML || '';
+        }
+      }
     }
 
-    // 3) MARKDOWN BODY: Only accept the explicit Copilot markdown body within that message.
-    const markdownRoot = latestMsg.querySelector('${COPILOT_MARKDOWN_BODY_SELECTOR}');
+    // 2) Fallback: Get the last non-empty markdown body on the page
+    let globalMarkdown = document.querySelectorAll('div.markdown-body[data-copilot-markdown], div.markdown-body, article.markdown');
+    let globalMarkdownFound = false;
+    let globalSource = 'none';
+    let finalText = scopedText;
+    let finalHtml = scopedHtml;
 
-    // If we can't find a markdown body, keep waiting.
-    if (!markdownRoot) {
-      return { text: '', html: '', isTyping: true, chars: 0, hasMarkdown: false };
+    if (scopedText.length === 0) {
+      const visibleMarkdowArray = Array.from(globalMarkdown).filter(el => (el.innerText || '').trim().length > 0);
+
+      if (visibleMarkdowArray.length > 0) {
+        const lastMd = visibleMarkdowArray.at(-1);
+        const cleaned = lastMd.innerText.replace(/Toggle sidebar|New chat|Manage chat|Agents|Quick links|Spaces|SparkPreview|Open workbench|WorkBench|Share/gi, '').trim();
+        finalText = cleaned.length > 0 ? cleaned : lastMd.innerText.trim();
+        finalHtml = lastMd.innerHTML || '';
+        globalMarkdownFound = true;
+        globalSource = 'fallback';
+        console.log(
+          '[Snapshot Fallback Used]',
+          'scopedLength:', scopedText.length,
+          'fallbackLength:', finalText.length,
+          'chosenSource:', globalSource
+        );
+      }
     }
 
-    // Extract ONLY the markdown body content.
-    const rawText = (markdownRoot.innerText || '').trim();
-    const html = markdownRoot.innerHTML || '';
-
-    const tooLarge = rawText.length > 5000;
-    const containsNav =
-      /Toggle sidebar|New chat|Manage chat|Agents|Quick links|Spaces|SparkPreview|Open workbench|WorkBench|Share/i.test(rawText);
-
-    // Strip obvious nav chrome but preserve the answer if stripping removes everything.
-    const cleanedText = rawText
-      .replace(/Toggle sidebar/gi, '')
-      .replace(/New chat/gi, '')
-      .replace(/Manage chat/gi, '')
-      .replace(/Agents/gi, '')
-      .replace(/Quick links/gi, '')
-      .replace(/Spaces/gi, '')
-      .replace(/SparkPreview/gi, '')
-      .replace(/Open workbench/gi, '')
-      .replace(/WorkBench/gi, '')
-      .replace(/Share/gi, '')
-      .trim();
-    const text = cleanedText.length > 0 ? cleanedText : rawText;
-
-    // Typing/done detection (Copilot-specific): read the toolbar button state.
-    const toolbarButton =
-      document.querySelector('div.ConversationView-module__footer--xr6HB form div.ChatInput-module__toolbarButtons--YDoIY > button') ||
-      document.querySelector('${COPILOT_LOADING_BUTTON_SELECTOR}');
-
-    const loadingAttr = toolbarButton?.getAttribute('data-loading');
-    const svg = toolbarButton?.querySelector('svg');
-    const svgClass = svg?.getAttribute('class') || '';
-    const svgAria = svg?.getAttribute('aria-label') || '';
-
-    const hasAirplane =
-      svgClass.includes('octicon-paper-airplane') || /paper.?airplane/i.test(svgAria) ||
-      Boolean(document.querySelector('${COPILOT_SEND_ICON_SELECTOR}'));
-    const hasStopIcon =
-      svgClass.includes('octicon-square-fill') || /stop/i.test(svgAria) ||
-      Boolean(document.querySelector('${COPILOT_STOP_ICON_SELECTOR}'));
-
-    // 5) PROGRESS/DONE RULES:
-    // - In progress iff data-loading truthy OR stop icon present.
-    // - Done iff airplane icon present AND data-loading falsy.
-    // - If neither icon found, keep waiting (treat as typing).
+    // 3) Determine typing status
     let isTyping = true;
-    if ((loadingAttr && loadingAttr !== 'false') || hasStopIcon) {
-      isTyping = true;
-    } else if (hasAirplane && (!loadingAttr || loadingAttr === 'false')) {
+    let hasAirplane = false;
+    let hasStopIcon = false;
+    let loadingAttr = null;
+
+    const toolbarButton = document.querySelector('div.ChatInput-module__toolbarButtons--YDoIY > button') ||
+                          document.querySelector('[data-component="IconButton"][data-loading]') ||
+                          document.querySelector('[data-loading]');
+
+    if (toolbarButton) {
+      loadingAttr = toolbarButton.getAttribute('data-loading');
+      const svg = toolbarButton.querySelector('svg');
+
+      if (svg) {
+        const svgClass = svg.getAttribute('class') || '';
+        const svgAria = svg.getAttribute('aria-label') || '';
+
+        hasStopIcon = svgClass.includes('octicon-square-fill') || /stop/i.test(svgAria);
+        hasAirplane = svgClass.includes('octicon-paper-airplane') || /paper.?airplane/i.test(svgAria) ||
+                      document.querySelector('svg.octicon-paper-airplane') !== null;
+      }
+    }
+
+    // Typing rules simplified per your spec
+    if (hasAirplane) {
+      // Send icon visible means Copilot is done accepting input, even if
+      // data-loading still reports "true" due to slow toolbar updates.
       isTyping = false;
-    } else {
+    } else if (hasStopIcon || (loadingAttr && loadingAttr !== 'false')) {
       isTyping = true;
     }
 
+    // Return snapshot with flags
     return {
-      text,
-      html: (containsNav || tooLarge) ? '' : html,
-      isTyping,
-      chars: text.length,
-      hasMarkdown: true,
-      hasAirplane,
-      loadingAttr,
-      hasStopIcon,
-      containsNav,
+      text: finalText,
+      html: finalHtml,
+      isTyping: isTyping,
+      chars: finalText.length || 0,
+      hasMarkdown: finalText.length > 0,
+      scopeFound: scopeFound,
+      latestFound: latestFound,
+      globalMarkdownFound: globalMarkdownFound,
+      hasAirplane: hasAirplane,
+      hasStopIcon: hasStopIcon,
+      loadingAttr: loadingAttr,
+      containsNav: /Toggle sidebar|New chat|Manage chat|Agents|Quick links|Spaces|SparkPreview|Open workbench|WorkBench|Share/i.test(finalText)
     };
   })()`;
 
@@ -349,10 +445,45 @@ let stableCycles = 0;
     const hasMarkdown: boolean = Boolean((snap as any).hasMarkdown);
     const hasAirplane: boolean = Boolean((snap as any).hasAirplane);
     const loadingAttr: string | null = typeof (snap as any).loadingAttr === 'string' ? (snap as any).loadingAttr : null;
+    const hasStopIcon: boolean = Boolean((snap as any).hasStopIcon);
+    const scopeFound: boolean = Boolean((snap as any).scopeFound);
+    const latestFound: boolean = Boolean((snap as any).latestFound);
+    const globalMarkdownFound: boolean = Boolean((snap as any).globalMarkdownFound);
 
-    const uiDone = hasAirplane && (!loadingAttr || loadingAttr === 'false');
+    const loadingActive = Boolean(loadingAttr && loadingAttr !== 'false');
+    const sendIconVisible = hasAirplane;
+    const uiDone = sendIconVisible && !loadingActive;
     const navRegex = /Toggle sidebar|New chat|Manage chat|Agents|Quick links|Spaces|SparkPreview|Open workbench|WorkBench|Share/i;
     const looksLikeChrome = navRegex.test(text) || text.length > 5000;
+
+    const elapsed = Date.now() - started;
+
+    // Debug logging per your spec: elapsed, chars, flags, isTyping, uiDone
+    if (elapsed % 5000 < pollIntervalMs || lastText !== text) {
+      logger(`[poll] elapsed=${elapsed}ms, chars=${chars}, scopeFound=${scopeFound}, latestFound=${latestFound}, globalMarkdownFound=${globalMarkdownFound}, isTyping=${isTyping}, uiDone=${uiDone}`);
+    }
+
+    // Enhanced logging for issues when chars=0
+    if (chars === 0) {
+      // Compare what scoped vs global found when hang detected
+      const getScopedHtml = text;
+      const getGlobalHtml = await Runtime.evaluate({
+        expression: `(() => {
+          const globalMarkdown = document.querySelectorAll('div.markdown-body[data-copilot-markdown], div.markdown-body, article.markdown');
+          const visibleMd = Array.from(globalMarkdown).filter(el => (el.innerText || '').trim().length > 0);
+          if (visibleMd.length > 0) {
+            const last = visibleMd.at(-1);
+            return (last.innerText || '').trim().substring(0, 200);
+          }
+          return '';
+        })()`,
+        returnByValue: true
+      }).then(r => r.result?.value || '');
+
+      logger(`[debug zero-chars] Potential hang - scoped vs global comparison:`);
+      logger(`[debug zero-chars] - scoped (first 200): "${String(getScopedHtml).substring(0, 200)}"`);
+      logger(`[debug zero-chars] - global (first 200): "${String(getGlobalHtml).substring(0, 200)}"`);
+    }
 
     // Double-check by re-reading markdown once UI says done.
     let confirmText = text;
@@ -381,10 +512,21 @@ let stableCycles = 0;
       }
     }
 
-    const elapsed = Date.now() - started;
-    const patchMarkersPresent = /(\*\*\*\s*Begin Patch|diff --git|@@ -\d+,\d+ \+\d+,\d+ @@|```diff|```patch)/i.test(
+    const patchMarkersPresent = /(\*\*\*\s*Begin Patch|diff --git|@@ -\d+,\d+ \+\d+,\d+ @@|```diff|```patch|\*\*\*\s*Update File)/i.test(
       confirmText,
     );
+
+    // Early exit if we detect patch markers and have reasonable content
+    if (patchMarkersPresent && chars > 50 && !isTyping) {
+      logger(`[patch-detected] Early exit: Patch markers found (${chars} chars, isTyping=${isTyping})`);
+      return { text: confirmText, html };
+    }
+
+    // Another early exit for UI completion with substantial content, skip stability checks
+    if ((uiDone || sendIconVisible) && hasMarkdown && chars > 100 && !containsNav && chars < 2000) {
+      logger(`[content-ready] Early exit: UI done with ${chars} chars (${chars < 800 ? 'short' : 'medium'} answer)`);
+      return { text: confirmText, html };
+    }
 
     if (confirmText.length > 800 && !firstLongAnswerAt) {
       firstLongAnswerAt = Date.now();
@@ -402,11 +544,15 @@ let stableCycles = 0;
       stableCycles += 1;
     }
 
-    if (!isTyping && uiDone && hasMarkdown && confirmText.length > 0) {
-      // If UI shows "done" and we have any markdown, exit immediately to avoid hangs.
-      logger('Copilot response complete ✓ (UI done / markdown present)');
-      return { text: confirmText || text, html };
+    // NEW EARLY EXIT: Send icon shown with non-empty markdown - return immediately
+    if (sendIconVisible && text.length > 0) {
+      logger(
+        `[immediate-exit] Send icon shown with ${text.length} chars (loadingAttr=${loadingAttr ?? 'null'}) - returning`,
+      );
+      return { text: text, html: html };
+    }
 
+    if (!isTyping && (uiDone || sendIconVisible) && hasMarkdown && confirmText.length > 0) {
       const enoughStableCycles =
         chars >= minCharsForLongAnswer
           ? stableCycles >= longAnswerStableCycles

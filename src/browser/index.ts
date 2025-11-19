@@ -138,8 +138,27 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
       }
       logger(`Copilot input ready '${inputElement}' (${promptText.length.toLocaleString()} chars queued)`);
 
-      // Skip model selection for Copilot (no model picker like ChatGPT)
-      logger('Skipping model selection for Copilot');
+      // Use model selection for Copilot if desiredModel is specified
+      if (config.desiredModel) {
+        // Import Copilot model selection function
+        const { ensureCopilotModelSelection } = await import('./actions/copilotModelSelection.js');
+        await withRetries(
+          () => ensureCopilotModelSelection(Runtime, config.desiredModel as string, logger),
+          {
+            retries: 2,
+            delayMs: 300,
+            onRetry: (attempt, error) => {
+              if (options.verbose) {
+                logger(`[retry] Copilot model selection attempt ${attempt + 1}: ${error instanceof Error ? error.message : error}`);
+              }
+            },
+          },
+        ).catch(() => {
+          logger('Copilot model selection failed, continuing with current model');
+        });
+      } else {
+        logger('No desiredModel specified for Copilot, using current selection');
+      }
     } else {
       // ChatGPT flow (existing logic)
       await navigateToChatGPT(Page, Runtime, config.url, logger);

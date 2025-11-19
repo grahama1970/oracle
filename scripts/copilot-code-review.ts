@@ -19,6 +19,36 @@ import { runBrowserMode, type BrowserAutomationConfig } from '../src/browserMode
 import { extractUnifiedDiff, isValidUnifiedDiff } from '../src/browser/diffExtractor.js';
 import { applyPatch, validatePatch, ensureGitRoot } from '../src/browser/gitIntegration.js';
 
+function normalizeAssistantOutput(answer: string): string {
+  if (!answer) return '';
+  // Treat obvious HTML responses from Copilot as markup and strip tags so the diff
+  // extractor sees the actual patch text instead of `<span>` wrappers.
+  if (!/[<>]/.test(answer)) {
+    return answer.trim();
+  }
+  return answer
+    .replace(/<\s*br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|h\d)>/gi, '\n\n')
+    .replace(/<li>/gi, '- ')
+    .replace(/<\/li>/gi, '\n')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&amp;/gi, '&')
+    .replace(/<[^>]+>/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+async function writeAnswerArtifacts(basePath: string, normalized: string, raw: string) {
+  await writeFile(basePath, normalized, 'utf8');
+  if (raw === normalized) {
+    return;
+  }
+  const htmlPath = basePath.endsWith('.txt') ? basePath.replace(/\.txt$/, '.html') : `${basePath}.html`;
+  await writeFile(htmlPath, raw, 'utf8');
+}
+
 function resolveDesiredModelLabel(raw: string | undefined): string {
   const value = (raw ?? '').trim();
   if (!value) {
@@ -146,7 +176,11 @@ async function main() {
         verbose: true,
       });
 
-      const answer = result.answerMarkdown || result.answerText || '';
+      const rawAnswer = result.answerMarkdown || result.answerText || '';
+      const answer = normalizeAssistantOutput(rawAnswer);
+      if (rawAnswer !== answer) {
+        console.log('[oracle] Normalized Copilot HTML response before diff extraction.');
+      }
       console.log('\n--- Copilot Response (truncated preview) ---');
       console.log(`${answer.slice(0, 800)}${answer.length > 800 ? '\n…' : ''}`);
 
@@ -159,7 +193,7 @@ async function main() {
 
         if (!patch) {
           const noDiffPath = path.join(tmpDir, `${slug}-copilot-review-no-diff.txt`);
-          await writeFile(noDiffPath, answer, 'utf8');
+          await writeAnswerArtifacts(noDiffPath, answer, rawAnswer);
           console.log(`[oracle] No diff found; wrote ${noDiffPath}`);
           break;
         }
@@ -167,7 +201,7 @@ async function main() {
         const isUnifiedDiff = isValidUnifiedDiff(patch, true);
         if (!isUnifiedDiff) {
           const invalidPath = path.join(tmpDir, `${slug}-copilot-review-invalid-diff.txt`);
-          await writeFile(invalidPath, answer, 'utf8');
+          await writeAnswerArtifacts(invalidPath, answer, rawAnswer);
           console.log(`[oracle] Diff failed strict validation; wrote ${invalidPath}`);
           break;
         }
@@ -199,7 +233,7 @@ async function main() {
         }
       } catch (err) {
         const invalidPath = path.join(tmpDir, `${slug}-copilot-review-invalid-diff.txt`);
-        await writeFile(invalidPath, answer, 'utf8');
+        await writeAnswerArtifacts(invalidPath, answer, rawAnswer);
         const msg = err instanceof Error ? err.message : String(err);
         console.log(`[oracle] Failed to extract a valid diff: ${msg}; wrote ${invalidPath}`);
         break;

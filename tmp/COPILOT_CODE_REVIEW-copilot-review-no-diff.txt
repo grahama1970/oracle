@@ -1,0 +1,23 @@
+<p>I can fill out this review-request template or generate a patch that adds one to a repo — I just need a few details first.</p>
+<p>Please tell me:</p>
+<ul>
+<li>Repo (owner/name) and target branch</li>
+<li>Paths of interest (files you expect to change)</li>
+<li>Short summary of the change (what, why, risks)</li>
+<li>Concrete objectives (what the review must check or achieve)</li>
+<li>Any constraints the patch must follow (coding style, sensitive APIs, etc.)</li>
+<li>Acceptance criteria and commands to run (tests, linters)</li>
+<li>Test plan steps</li>
+<li>Any implementation notes or known touch points</li>
+<li>Whether you want me to produce a unified-diff patch that adds/updates files on the branch</li>
+</ul>
+<p>If you prefer, I can draft the full review request now using reasonable assumptions — confirm and I’ll proceed.</p>
+<p>Below is an example of a completed review-request based on a hypothetical change so you can see the expected format. If you confirm the inputs above I’ll produce one tailored to your change or create a patch.</p>
+<div class="position-relative"><button class="FileBlock-module__container--Dzsqa" aria-label="View file: COPILOT_REVIEW_REQUEST_EXAMPLE.md" data-testid="chat-message-view-file-COPILOT_REVIEW_REQUEST_EXAMPLE.md"><div class="FileBlock-module__header--AdNd3"><div class="FileBlock-module__language--hjnkp"><svg aria-hidden="true" focusable="false" class="octicon octicon-markdown MarkdownRenderer-module__noFade--P7umO" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" display="inline-block" overflow="visible" style="vertical-align: text-bottom;"><path d="M14.85 3c.63 0 1.15.52 1.14 1.15v7.7c0 .63-.51 1.15-1.15 1.15H1.15C.52 13 0 12.48 0 11.84V4.15C0 3.52.52 3 1.15 3ZM9 11V5H7L5.5 7 4 5H2v6h2V8l1.5 1.92L7 8v3Zm2.99.5L14.5 8H13V5h-2v3H9.5Z"></path></svg><span class="FileBlock-module__name--PRLLi">COPILOT_REVIEW_REQUEST_EXAMPLE.md</span></div><div class="FileBlock-module__expandIconContainer--re33w"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" role="presentation"><g clip-path="url(#clip0_6911_7629)" fill="currentColor"><path d="M14.722 6.047a.75.75 0 11-1.5 0V3.615L10.2 6.638a.75.75 0 01-1.06-1.06l3.023-3.024H9.729a.75.75 0 010-1.499h4.243a.75.75 0 01.75.75v4.242zM1.278 9.953a.75.75 0 111.5 0v2.432L5.8 9.362a.75.75 0 011.06 1.06l-3.023 3.024h2.433a.75.75 0 010 1.499H2.028a.75.75 0 01-.75-.75V9.953z"></path></g><defs><clipPath id="clip0_6911_7629"><path fill="#fff" d="M0 0H16V16H0z"></path></clipPath></defs></svg></div></div><pre class="FileBlock-module__previewCode--xp45Y FileBlock-module__isClipped--g6E0E" aria-hidden="true"><code><span class="hljs-section" node="[object Object]"># Add configurable request timeout and improved retry behavior to HTTP client</span>
+
+<span class="hljs-section" node="[object Object]">## Repository and branch</span>
+
+<span class="hljs-bullet" node="[object Object]">-</span> <span class="hljs-strong" node="[object Object]">**Repo:**</span> example-org/example-service
+<span class="hljs-bullet" node="[object Object]">-</span> <span class="hljs-strong" node="[object Object]">**Branch:**</span> feature/http-timeouts
+</code></pre></button></div>
+<p>Next step: provide the repo/branch and the details asked above and I’ll produce a tailored review request or a unified-diff patch per your preference.</p>

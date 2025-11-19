@@ -68,7 +68,7 @@ async function exampleWithFullAuth() {
       // Small delay between requests
       await new Promise(resolve => setTimeout(resolve, 3000));
 
-    } catch (error) {
+    } catch (error: any) {
       console.error(`❌ Query ${prompts.indexOf(prompt) + 1} failed:`, error.message);
 
       // Give time before retry
@@ -171,7 +171,7 @@ async function exampleForCI() {
 
   } catch (error) {
     console.error('::set-output name=status::failed');
-    console.error('::error::Oracle failed:', error.message);
+    console.error('::error::Oracle failed:', (error as Error).message);
     throw error;
   }
 }
@@ -205,7 +205,7 @@ async function main() {
         console.log('- Set GITHUB_USERNAME, GITHUB_PASSWORD, (optional) GITHUB_TOTP_SECRET');
         console.log('- Or have an authenticated Chrome profile at ~/.oracle/chrome-profile');
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('\n❌ Failed:', error.message);
     console.log('\nTroubleshooting:');
     console.log('1. Run: pnpm tsx tmp/validate-auth-enhanced.ts');
@@ -215,7 +215,9 @@ async function main() {
   }
 }
 
-if (require.main === module) {
+import { fileURLToPath } from 'node:url';
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
   main().catch(error => {
     console.error('Script error:', error);
     process.exit(1);

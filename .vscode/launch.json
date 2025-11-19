@@ -1,0 +1,21 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Playwright Tests (Chromium)",
+      "command": "npx playwright test --project=chromium",
+      "request": "launch",
+      "type": "node-terminal",
+      "cwd": "${workspaceFolder}",
+      "env": { "CI": "false" }
+    },
+    {
+      "name": "Playwright Debug (script)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/tmp/model_picker.js",
+      "skipFiles": ["<node_internals>/**"],
+      "env": { "PWDEBUG": "1" }
+    }
+  ]
+}
