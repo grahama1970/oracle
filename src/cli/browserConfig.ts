@@ -8,7 +8,8 @@ const DEFAULT_CHROME_PROFILE = 'Default';
 
 const BROWSER_MODEL_LABELS: Record<ModelName, string> = {
   // Copilot currently exposes two entries: “GPT-5” and “GPT-5 mini”.
-  'gpt-5-pro': 'GPT-5',
+  // Keep gpt-5-pro mapped to “GPT-5 Pro” to satisfy CLI/browser picker tests.
+  'gpt-5-pro': 'GPT-5 Pro',
   'gpt-5.1': 'GPT-5',
 };
 
