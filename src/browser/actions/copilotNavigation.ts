@@ -315,6 +315,8 @@ export async function readCopilotModelLabel(
     const { result } = await Runtime.evaluate({
       expression: `(() => {
         const selectors = [
+          // Primary: hashed class used by Copilot model chip
+          '.ModelPicker-module__buttonName--Iid1H',
           '${MODEL_BUTTON_SELECTOR}',
           '[data-testid*="model-switcher"]',
           'button[aria-label*="Model"]',

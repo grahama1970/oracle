@@ -176,14 +176,23 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
           logger('Copilot model selection failed, continuing with current model');
         });
 
-        // Verify the model chip matches the desired label; fail fast if not.
+        // Verify the model chip matches the desired label; warn (not fail) when aliases appear.
         const chip = await readCopilotModelLabel(Runtime, logger);
-        const norm = (input: string | null) => (input ?? '').toLowerCase().replace(/\s+/g, '');
-        if (config.desiredModel && chip && norm(chip) !== norm(config.desiredModel as string)) {
-          throw new Error(
-            `Copilot model mismatch: desired="${config.desiredModel}" chip="${chip}". ` +
-              'Please ensure the GPT-5 picker is selected.',
-          );
+        const normalize = (input: string | null) =>
+          (input ?? '')
+            .toLowerCase()
+            .replace(/spark/g, '') // some UIs show "Spark" as the chip label for GPT‑5
+            .replace(/\s+/g, '')
+            .trim();
+        if (config.desiredModel && chip) {
+          const desiredNorm = normalize(config.desiredModel as string);
+          const chipNorm = normalize(chip);
+          if (desiredNorm !== chipNorm) {
+            logger(
+              `Copilot model chip differs from desired: desired="${config.desiredModel}" chip="${chip}". ` +
+                'Continuing, but please verify the picker is set to the intended GPT-5 variant.',
+            );
+          }
         }
       } else {
         logger('No desiredModel specified for Copilot, using current selection');
