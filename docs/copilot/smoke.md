@@ -14,6 +14,7 @@ ORACLE_NO_DETACH=1 xvfb-run -a pnpm tsx scripts/copilot-code-review.ts docs/smok
 Expectations:
 - Latest assistant markdown only (no sidebar). Diff in a single fenced ```diff block.
 - If no diff: save assistant reply to `docs/smoke/response_oracle.md` for comparison with `response_web.md`.
+- If run hangs or chip mismatch, see `troubleshooting.md` for solutions.
 
 What to verify:
 - `status=success` when diff found; `forced_timeout` otherwise.

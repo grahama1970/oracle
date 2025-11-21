@@ -1,5 +1,7 @@
 # Browser Mode
 
+> For Copilot-browser specifics (model picker, completion signals, smoke test), see `docs/copilot/browser-mode.md`.
+
 `oracle --engine browser` routes the assembled prompt bundle through the ChatGPT web UI instead of the Responses API. (Legacy `--browser` still maps to `--engine browser`, but it will be removed.) If you omit `--engine`, Oracle auto-picks API when `OPENAI_API_KEY` is available and falls back to browser otherwise. The CLI writes the same session metadata/logs as API runs, but the payload is pasted into ChatGPT via a temporary Chrome profile.
 
 ## Current Pipeline

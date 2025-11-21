@@ -12,7 +12,7 @@ git log --oneline -3
 echo ""
 
 # Default arguments
-TEMPLATE="${1:-docs/templates/COPILOT_CODE_REVIEW.md}"
+TEMPLATE="${1:-docs/copilot/templates/COPILOT_REVIEW_REQUEST_EXAMPLE.md}"
 MAX_TURNS="${2:-3}"
 APPLY_MODE="${3:-none}"
 
