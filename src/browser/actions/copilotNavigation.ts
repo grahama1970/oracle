@@ -360,60 +360,12 @@ export async function extractCopilotResponse(
     messagesFound: 0,
     sidebarContentRemoved: 0,
     assistantContainerFound: false,
+    markdownBodiesFound: 0,
   };
 
-  // Try clipboard copy first (preferred method)
-  try {
-    // Find the last assistant message copy button
-    const { result: copyCheck } = await Runtime.evaluate({
-      expression: `(() => {
-        const copyButtons = document.querySelectorAll('button[aria-label*="copy"], button[data-component*="copy"], .copy-button');
-        return copyButtons.length > 0;
-      })()`,
-      returnByValue: true
-    });
-
-    if (copyCheck.value) {
-      metrics.copyButtonFound = true;
-      // Click to copy
-      await Runtime.evaluate({
-        expression: `(() => {
-          const copyButtons = document.querySelectorAll('button[aria-label*="copy"], button[data-component*="copy"], .copy-button');
-          if (copyButtons.length > 0) {
-            copyButtons[copyButtons.length - 1].click();
-            return true;
-          }
-          return false;
-        })()`,
-        returnByValue: true
-      });
-
-      await delay(300);
-
-      // Get clipboard content
-      const { result: clipboardResult } = await Runtime.evaluate({
-        expression: `navigator.clipboard.readText()`,
-        returnByValue: true
-      });
-
-      const clipboardText = clipboardResult.value || '';
-      if (clipboardText && clipboardText.trim().length > 0) {
-        metrics.clipboardSuccess = true;
-        const cleaned = clipboardText.trim();
-        logger('Extracted response via clipboard copy');
-        if (options.selectorMetrics) {
-          logger('Extraction metrics:', metrics);
-        }
-        return { text: cleaned, html: cleaned, metrics };
-      }
-    }
-  } catch (error) {
-    logger.warn('Clipboard extraction failed, falling back to DOM:', error);
-  }
-
-  // Fallback to DOM extraction with improved filtering
+  // Direct DOM extraction of the latest assistant markdown (clipboard read is unreliable in automation).
   metrics.fallbackUsed = true;
-  logger('Using DOM extraction fallback with sidebar filtering');
+  logger('Using DOM extraction (latest assistant markdown only)');
 
   const { result } = await Runtime.evaluate({
     expression: `(() => {
@@ -436,7 +388,7 @@ export async function extractCopilotResponse(
       if (!container) return { error: 'no-container' };
 
       const allMsgs = Array.from(
-        container.querySelectorAll('.markdown-body, [data-message-role="assistant"]')
+        container.querySelectorAll('.markdown-body[data-copilot-markdown="true"], .markdown-body, [data-message-role="assistant"]')
       );
       const messagesFound = allMsgs.length;
 
@@ -470,8 +422,9 @@ export async function extractCopilotResponse(
         });
       });
 
-      // Extract text from markdown body
-      const markdownBody = clone.querySelector('[data-testid="markdown-body"], .markdown-body');
+      // Prefer explicit markdown body with copilot flag
+      const markdownBodies = clone.querySelectorAll('.markdown-body[data-copilot-markdown="true"], [data-copilot-markdown="true"], [data-testid="markdown-body"]');
+      const markdownBody = markdownBodies.length ? markdownBodies[markdownBodies.length - 1] : clone.querySelector('.markdown-body');
       const textContent = markdownBody ? markdownBody.textContent || '' : clone.textContent || '';
 
       const htmlContent = (latestMsg as HTMLElement).innerHTML;
@@ -481,7 +434,8 @@ export async function extractCopilotResponse(
         html: htmlContent,
         messagesFound,
         sidebarContentRemoved: removeCount,
-        assistantContainerFound: !!document.querySelector('${COPILOT_ASSISTANT_CONTAINER_SELECTOR}')
+        assistantContainerFound: !!document.querySelector('${COPILOT_ASSISTANT_CONTAINER_SELECTOR}'),
+        markdownBodiesFound: markdownBodies.length
       };
     })()`,
     returnByValue: true
@@ -503,6 +457,7 @@ export async function extractCopilotResponse(
   metrics.messagesFound = resultValue.messagesFound;
   metrics.sidebarContentRemoved = resultValue.sidebarContentRemoved;
   metrics.assistantContainerFound = resultValue.assistantContainerFound;
+  metrics.markdownBodiesFound = resultValue.markdownBodiesFound ?? 0;
 
   const cleaned = resultValue.text.trim();
   logger('Extracted response via DOM fallback', {
