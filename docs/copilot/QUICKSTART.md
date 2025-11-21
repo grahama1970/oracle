@@ -18,23 +18,21 @@ xvfb-run -a pnpm tsx tmp/validate-auth-enhanced.ts --quick --headless
 ```
 Expect: “Copilot access: ✅ CHAT READY”. If not, fix auth first (see `auth.md`).
 
-## Human use (manual in Copilot Web)
+## Human use (manual fallback — tedious copy/paste)
+If automation/CLI isn’t available:
 1) Open `docs/copilot/templates/COPILOT_REVIEW_REQUEST_EXAMPLE.md`.
-2) Edit repo/branch/paths **and describe the specific files/areas you want reviewed** (the template is meant to focus Copilot on the code you and the agent care about). Ensure that branch is committed and pushed so Copilot Web can see it.
-3) In Copilot Web, pick GPT‑5 (or another Copilot-provided model if you choose), paste the prompt, wait for clarifying answers + diff. Copilot Web can read your public/private repo for that branch, so you avoid manual file copy/paste.
-4) If no diff, ensure the branch is pushed and retry once.
+2) Edit repo/branch/paths and the specific files/areas to review; ensure the branch is committed and pushed so Copilot Web can see it.
+3) In Copilot Web, select GPT‑5 (or another Copilot model), paste the prompt, wait for clarifying answers + diff. Manual copy/paste is slower; prefer the CLI/helper above when possible.
+4) If no diff, re-check that the branch is pushed and retry once.
 
 ## Project Agent with Human prompt (one-turn, low risk)
-Recommended: bash helper (simple, MCP-free). Make sure the branch with your changes is committed and pushed so Copilot can see the code:
+Recommended: **use the helper** (no bash knowledge needed; copy/paste and run). Ensure your branch is pushed:
 ```bash
-# verify branch is pushed
-git fetch origin
-BR=$(git branch --show-current)
-git rev-parse --verify "origin/$BR" >/dev/null || { echo "Branch not pushed"; exit 1; }
-
+git fetch origin && BR=$(git branch --show-current) && git rev-parse --verify "origin/$BR" >/dev/null || { echo "Branch not pushed; ask the human to push before running Copilot."; exit 1; }
 bash docs/copilot/tests/use-copilot.sh docs/copilot/templates/COPILOT_REVIEW_REQUEST_EXAMPLE.md 1 none
 ```
-Equivalent CLI (explicit flags):
+Do not auto-commit or push; if the branch isn’t on the remote, stop and consult the human.
+Explicit CLI (advanced):
 ```bash
 ORACLE_NO_DETACH=1 xvfb-run -a pnpm tsx scripts/copilot-code-review.ts \
   docs/copilot/templates/COPILOT_REVIEW_REQUEST_EXAMPLE.md \
