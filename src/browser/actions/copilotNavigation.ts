@@ -12,9 +12,45 @@ import {
   COPILOT_CONVERSATION_SCOPE_SELECTOR,
   COPILOT_STOP_ICON_SELECTOR,
   COPILOT_SEND_ICON_SELECTOR,
+  COPILOT_SPINNER_SELECTOR,
+  COPILOT_ASSISTANT_CONTAINER_SELECTOR,
+  STOP_BUTTON_SELECTOR,
+  SEND_BUTTON_SELECTOR,
 } from '../constants.js';
 
 const COPILOT_CHAT_URL = 'https://github.com/copilot?tab=chat';
+
+/**
+ * Completion detection signals for tracking Copilot response state
+ */
+interface CompletionSignals {
+  stopButtonGone: boolean;
+  sendButtonEnabled: boolean;
+  spinnerGone: boolean;
+  markdownStable: boolean;
+  cyclesStable: number;
+}
+
+/**
+ * Options for waitForCopilotResponse function
+ */
+interface WaitForResponseOptions {
+  timeout?: number;
+  stabilityCheckInterval?: number;
+  requiredStableCycles?: number;
+}
+
+/**
+ * Result from waitForCopilotResponse function
+ */
+interface WaitForResponseResult {
+  completed: boolean;
+  completionPath: string;
+  signals: CompletionSignals;
+  elapsed: number;
+  text: string;
+  html: string | null;
+}
 
 /**
  * Navigate to GitHub Copilot and ensure we're on the right page
@@ -267,123 +303,439 @@ export async function waitForCopilotReady(
 }
 
 /**
- * Wait for Copilot response completed using robust signals + inactivity fallback.
+ * Extract the latest Copilot response from the page with improved content cleaning.
+ * Tries clipboard copy first, falls back to DOM extraction with sidebar filtering.
+ */
+export async function extractCopilotResponse(
+  Runtime: ChromeClient['Runtime'],
+  options: { selectorMetrics?: boolean } = {}
+): Promise<{ text: string; html: string | null; metrics?: any }> {
+  const metrics = {
+    copyButtonFound: false,
+    clipboardSuccess: false,
+    fallbackUsed: false,
+    messagesFound: 0,
+    sidebarContentRemoved: 0,
+    assistantContainerFound: false,
+  };
+
+  // Try clipboard copy first (preferred method)
+  try {
+    // Find the last assistant message copy button
+    const { result: copyCheck } = await Runtime.evaluate({
+      expression: `(() => {
+        const copyButtons = document.querySelectorAll('button[aria-label*="copy"], button[data-component*="copy"], .copy-button');
+        return copyButtons.length > 0;
+      })()`,
+      returnByValue: true
+    });
+
+    if (copyCheck.value) {
+      metrics.copyButtonFound = true;
+      // Click to copy
+      await Runtime.evaluate({
+        expression: `(() => {
+          const copyButtons = document.querySelectorAll('button[aria-label*="copy"], button[data-component*="copy"], .copy-button');
+          if (copyButtons.length > 0) {
+            copyButtons[copyButtons.length - 1].click();
+            return true;
+          }
+          return false;
+        })()`,
+        returnByValue: true
+      });
+
+      await delay(300);
+
+      // Get clipboard content
+      const { result: clipboardResult } = await Runtime.evaluate({
+        expression: `navigator.clipboard.readText()`,
+        returnByValue: true
+      });
+
+      const clipboardText = clipboardResult.value || '';
+      if (clipboardText && clipboardText.trim().length > 0) {
+        metrics.clipboardSuccess = true;
+        const cleaned = clipboardText.trim();
+        logger('Extracted response via clipboard copy');
+        if (options.selectorMetrics) {
+          logger('Extraction metrics:', metrics);
+        }
+        return { text: cleaned, html: cleaned, metrics };
+      }
+    }
+  } catch (error) {
+    logger.warn('Clipboard extraction failed, falling back to DOM:', error);
+  }
+
+  // Fallback to DOM extraction with improved filtering
+  metrics.fallbackUsed = true;
+  logger('Using DOM extraction fallback with sidebar filtering');
+
+  const { result } = await Runtime.evaluate({
+    expression: `(() => {
+      const scopes = [
+        '${COPILOT_CONVERSATION_SCOPE_SELECTOR}',
+        '${COPILOT_ASSISTANT_CONTAINER_SELECTOR}',
+        '[data-testid="chat-thread"]',
+        'main[role="main"]'
+      ];
+
+      let container = null;
+      for (const selector of scopes) {
+        const found = document.querySelector(selector);
+        if (found) {
+          container = found;
+          break;
+        }
+      }
+
+      if (!container) return { error: 'no-container' };
+
+      const allMsgs = Array.from(
+        container.querySelectorAll('.markdown-body, [data-message-role="assistant"]')
+      );
+      const messagesFound = allMsgs.length;
+
+      const latestMsg = allMsgs.length ? allMsgs[allMsgs.length - 1] : null;
+      if (!latestMsg) return { error: 'no-messages' };
+
+      // Clone to avoid mutating live DOM
+      const clone = latestMsg.cloneNode(true) as HTMLElement;
+
+      // Remove known sidebar/nav/tool elements
+      const removeSelectors = [
+        '[role="navigation"]',
+        '.copilot-sidebar',
+        '.copilot-toolbar',
+        '[data-testid="copilot-sidebar"]',
+        '.ActionList',
+        '[aria-label*="sidebar"]',
+        'header',
+        'nav',
+        '.navigation',
+        '.menu',
+        '.sidebar'
+      ];
+
+      let removeCount = 0;
+      removeSelectors.forEach((sel) => {
+        const elements = clone.querySelectorAll(sel);
+        elements.forEach((node) => {
+          node.remove();
+          removeCount++;
+        });
+      });
+
+      // Extract text from markdown body
+      const markdownBody = clone.querySelector('[data-testid="markdown-body"], .markdown-body');
+      const textContent = markdownBody ? markdownBody.textContent || '' : clone.textContent || '';
+
+      const htmlContent = (latestMsg as HTMLElement).innerHTML;
+
+      return {
+        text: textContent.trim(),
+        html: htmlContent,
+        messagesFound,
+        sidebarContentRemoved: removeCount,
+        assistantContainerFound: !!document.querySelector('${COPILOT_ASSISTANT_CONTAINER_SELECTOR}')
+      };
+    })()`,
+    returnByValue: true
+  });
+
+  const resultValue = result.value;
+
+  if (resultValue.error) {
+    const errorMsg = resultValue.error === 'no-container'
+      ? 'No assistant container found'
+      : 'No messages found';
+    logger.warn(`DOM extraction failed: ${errorMsg}`);
+    if (options.selectorMetrics) {
+      logger('Extraction metrics:', metrics);
+    }
+    return { text: '', html: null, metrics };
+  }
+
+  metrics.messagesFound = resultValue.messagesFound;
+  metrics.sidebarContentRemoved = resultValue.sidebarContentRemoved;
+  metrics.assistantContainerFound = resultValue.assistantContainerFound;
+
+  const cleaned = resultValue.text.trim();
+  logger('Extracted response via DOM fallback', {
+    length: cleaned.length,
+    extractedFrom: 'assistant container',
+    sidebarItemsRemoved: metrics.sidebarContentRemoved
+  });
+
+  if (options.selectorMetrics) {
+    logger('Extraction metrics:', metrics);
+  }
+
+  return { text: cleaned, html: resultValue.html, metrics };
+}
+
+/**
+ * - Stop button disappears
+ * - Send button re-enabled
+ * - Spinner disappears
+ * - Markdown content stable (no changes for N cycles)
+ * - MutationObserver detects final assistant message update
+ *
+ * Returns early if all signals indicate completion, or after timeout with partial status.
  */
 export async function waitForCopilotResponse(
   Runtime: ChromeClient['Runtime'],
   timeoutMs: number,
   logger: BrowserLogger,
-): Promise<{ text: string; html: string | null }> {
-  logger('Waiting for Copilot response...');
-  const started = Date.now();
-  const pollIntervalMs = 1000;
+  options: WaitForResponseOptions = {}
+): Promise<WaitForResponseResult> {
+  const {
+    stabilityCheckInterval = 500,
+    requiredStableCycles = 3,
+  } = options;
 
-  const MIN_CHARS_FOR_VALID_RESPONSE = 20;
-  const INACTIVITY_THRESHOLD_MS = 6000;
-  const HARD_TIMEOUT_MS = timeoutMs;
+  const start = Date.now();
+
+  let lastMarkdownContent = '';
+  let stableCycles = 0;
+  let mutationDetected = false;
+  let observerDisconnected = false;
+
+  const signals: CompletionSignals = {
+    stopButtonGone: false,
+    sendButtonEnabled: false,
+    spinnerGone: false,
+    markdownStable: false,
+    cyclesStable: 0,
+  };
+
+  logger('Waiting for Copilot response to complete...');
+
+  // Set up MutationObserver to watch the assistant message container
+  const observerSetup = await Runtime.evaluate({
+    expression: `(() => {
+      const containerSelector = '${COPILOT_ASSISTANT_CONTAINER_SELECTOR}';
+      const container = document.querySelector(containerSelector);
+      if (!container) {
+        return { success: false };
+      }
+
+      let lastUpdate = Date.now();
+      const observer = new MutationObserver(() => {
+        lastUpdate = Date.now();
+      });
+
+      observer.observe(container, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+
+      // Store observer reference for cleanup
+      (window as any).__copilotObserver = observer;
+      (window as any).__copilotLastUpdate = () => lastUpdate;
+      return { success: true, hasObserver: true };
+    })()`,
+    returnByValue: true
+  });
+
+  const observerCreated = observerSetup.result.value?.success === true;
 
   let lastText = '';
-  let lastChangeTime = Date.now();
+  let lastHtml: string | null = null;
+  let firstValidContent = false;
 
-  while (Date.now() - started < HARD_TIMEOUT_MS) {
-    const { result } = await Runtime.evaluate({
-      expression: `(() => {
-        const scope =
-          document.querySelector('${COPILOT_CONVERSATION_SCOPE_SELECTOR}') ||
-          document.querySelector('[data-testid="chat-thread"], main[role="main"]');
-        if (!scope) return { status: 'no-scope', chars: 0 };
+  try {
+    while (Date.now() - start < timeoutMs) {
+      const elapsed = Date.now() - start;
 
-        const allMsgs = Array.from(
-          scope.querySelectorAll('.markdown-body, [data-message-role="assistant"]'),
-        );
-        const latestMsg = allMsgs.length ? allMsgs[allMsgs.length - 1] : null;
+      const { result } = await Runtime.evaluate({
+        expression: `(() => {
+          const scope =
+            document.querySelector('${COPILOT_CONVERSATION_SCOPE_SELECTOR}') ||
+            document.querySelector('${COPILOT_ASSISTANT_CONTAINER_SELECTOR}') ||
+            document.querySelector('[data-testid="chat-thread"], main[role="main"]');
+          if (!scope) return { status: 'no-scope', signals: {} };
 
-        let text = '';
-        let html = '';
-        if (latestMsg) {
-          const clone = latestMsg.cloneNode(true);
-          clone.querySelectorAll('button, .sr-only').forEach((el) => el.remove());
-          text = (clone.innerText || '').trim();
-          html = (latestMsg as HTMLElement).innerHTML;
+          const allMsgs = Array.from(
+            scope.querySelectorAll('.markdown-body, [data-message-role="assistant"]'),
+          );
+          const latestMsg = allMsgs.length ? allMsgs[allMsgs.length - 1] : null;
+
+          let text = '';
+          let html = '';
+          if (latestMsg) {
+            // Clone to avoid mutating live DOM
+            const clone = latestMsg.cloneNode(true) as HTMLElement;
+            // Remove buttons and screen reader content
+            clone.querySelectorAll('button, .sr-only, .copilot-sidebar, [role="navigation"], nav, header').forEach((el) => el.remove());
+            text = (clone.innerText || '').trim();
+            html = (latestMsg as HTMLElement).innerHTML;
+          }
+
+          // Check completion signals
+          const sel = {
+            stop: [
+              'button[aria-label="Stop generating"]',
+              '.octicon-stop',
+              '${STOP_BUTTON_SELECTOR}',
+            ],
+            send: [
+              'button[aria-label="Send now"]',
+              '.octicon-paper-airplane',
+              '${SEND_BUTTON_SELECTOR}',
+            ],
+            spinner: ['[data-loading="true"]', '.animate-spin', 'svg[class*="anim-rotate"]', '${COPILOT_SPINNER_SELECTOR}'],
+          };
+
+          const find = (arr: string[]) => arr.some((s) => !!document.querySelector(s));
+
+          const hasStop = find(sel.stop);
+          const hasSpinner = find(sel.spinner);
+          const hasSend = find(sel.send);
+
+          const scopeCheck = scope.cloneNode(true) as HTMLElement;
+          scopeCheck.querySelectorAll('[role="navigation"], .copilot-sidebar, nav, header').forEach((el) => el.remove());
+          const clearText = (scopeCheck.innerText || '').trim();
+
+          // Check send button state
+          let sendButtonEnabled = false;
+          const sendButton = document.querySelector(sel.send.join(', '));
+          if (sendButton) {
+            const button = sendButton as HTMLButtonElement;
+            if (button.disabled !== undefined) {
+              sendButtonEnabled = !button.disabled;
+            } else {
+              // Check for disabled class or attribute
+              sendButtonEnabled = !button.classList.contains('disabled') && !button.hasAttribute('disabled');
+            }
+          }
+
+          return {
+            status: 'ok',
+            text,
+            html,
+            signals: {
+              stopButtonGone: !hasStop,
+              sendButtonEnabled,
+              spinnerGone: !hasSpinner,
+              markdownStable: false,
+              cyclesStable: 0,
+            },
+            hasContent: text.length > 0,
+            clearOfSidebarBleed: clearText.includes(text) // Ensure text comes from assistant container
+          };
+        })()`,
+        returnByValue: true,
+      });
+
+      const state = result.value || {};
+      const now = Date.now();
+
+      if (state.status === 'ok') {
+        // Update basic signals
+        signals.stopButtonGone = state.signals.stopButtonGone;
+        signals.sendButtonEnabled = state.signals.sendButtonEnabled;
+        signals.spinnerGone = state.signals.spinnerGone;
+
+        // Check markdown stability
+        if (state.text !== lastMarkdownContent && state.text.length > 0) {
+          stableCycles = 0;
+          lastMarkdownContent = state.text;
+          lastText = state.text;
+          lastHtml = state.html;
+        } else if (state.text.length > 0) {
+          stableCycles++;
         }
 
-        const sel = {
-          stop: [
-            'button[aria-label="Stop generating"]',
-            '.octicon-stop',
-            '[data-testid="stop-button"]',
-          ],
-          send: [
-            'button[aria-label="Send now"]',
-            '.octicon-paper-airplane',
-            '[data-testid="send-button"]',
-            'button[type="submit"]:not([disabled])',
-          ],
-          spinner: ['[data-loading="true"]', '.animate-spin', 'svg[class*="anim-rotate"]'],
-        };
+        signals.cyclesStable = stableCycles;
+        signals.markdownStable = stableCycles >= requiredStableCycles;
 
-        const find = (arr: string[]) => arr.some((s) => !!document.querySelector(s));
-
-        const hasStop = find(sel.stop);
-        const hasSpinner = find(sel.spinner);
-        const hasSend = find(sel.send);
-
-        const isBusy = hasStop || hasSpinner;
-
-        return {
-          status: 'ok',
-          text,
-          html,
-          isBusy,
-          hasSend,
-          hasStop,
-          hasSpinner,
-          chars: text.length,
-        };
-      })()`,
-      returnByValue: true,
-    });
-
-    const state = result.value || {};
-    const now = Date.now();
-
-    if (state.status === 'ok') {
-      if (state.text !== lastText) {
-        lastChangeTime = now;
-        lastText = state.text;
-      }
-      const timeSinceLastChange = now - lastChangeTime;
-
-      if ((now - started) % 3000 < 1000) {
-        logger(
-          `[poll] chars=${state.text.length}, busy=${state.isBusy} (stop=${state.hasStop}, spin=${state.hasSpinner}), sendVisible=${state.hasSend}, stable=${(
-            timeSinceLastChange / 1000
-          ).toFixed(1)}s`,
-        );
-      }
-
-      if (state.hasSend && !state.isBusy) {
-        if (timeSinceLastChange > 1000 && state.text.length > MIN_CHARS_FOR_VALID_RESPONSE) {
-          logger('Copilot response complete (UI Signal: Send Icon).');
-          return { text: state.text, html: state.html };
+        // Check mutation observer
+        if (observerCreated) {
+          const { result: mutationResult } = await Runtime.evaluate({
+            expression: `(() => {
+              const getLastUpdate = (window as any).__copilotLastUpdate;
+              const now = Date.now();
+              return getLastUpdate ? now - getLastUpdate() : 0;
+            })()`,
+            returnByValue: true
+          });
+          const timeSinceLastMutation = mutationResult.value || 0;
+          mutationDetected = timeSinceLastMutation > stabilityCheckInterval * requiredStableCycles;
         }
+
+        // Log progress every 5 seconds
+        if (Math.floor(elapsed / 5000) > Math.floor((elapsed - stabilityCheckInterval) / 5000)) {
+          logger(
+            `[progress] ${(elapsed / 1000).toFixed(1)}s | stop=${signals.stopButtonGone} send=${signals.sendButtonEnabled} spin=${signals.spinnerGone} stable=${stableCycles}/${requiredStableCycles} chars=${state.text.length}`
+          );
+        }
+
+        // Check if all signals indicate completion
+        if (
+          signals.stopButtonGone &&
+          signals.sendButtonEnabled &&
+          signals.spinnerGone &&
+          signals.markdownStable &&
+          state.hasContent
+        ) {
+          logger('Copilot response complete (all signals green)');
+          return {
+            completed: true,
+            completionPath: 'all_signals',
+            signals,
+            text: lastText,
+            html: lastHtml,
+            elapsed: now - start
+          };
+        }
+
+        // Partial completion check (if we have content and it's stable but some UI signals aren't ready)
+        if (signals.markdownStable && state.hasContent && (elapsed > Math.min(timeoutMs, 30000) || firstValidContent)) {
+          const completionPath = !signals.stopButtonGone && signals.sendButtonEnabled ? 'ui_inconsistent' : 'partial_completion';
+          logger(`Copilot response partial completion detected (${completionPath})`);
+          return {
+            completed: true,
+            completionPath,
+            signals,
+            text: lastText,
+            html: lastHtml,
+            elapsed: now - start
+          };
+        }
+
+        firstValidContent = firstValidContent || (state.hasContent && state.clearOfSidebarBleed);
       }
 
-      if (
-        !state.isBusy &&
-        state.text.length > MIN_CHARS_FOR_VALID_RESPONSE &&
-        timeSinceLastChange > INACTIVITY_THRESHOLD_MS
-      ) {
-        logger(
-          `Copilot response complete (Inactivity Fallback: stable for ${INACTIVITY_THRESHOLD_MS}ms).`,
-        );
-        return { text: state.text, html: state.html };
-      }
+      await delay(stabilityCheckInterval);
     }
 
-    await delay(pollIntervalMs);
-  }
+    // Timeout reached - return partial
+    logger('Timeout waiting for Copilot response - returning partial');
+    return {
+      completed: false,
+      completionPath: 'forced_timeout',
+      signals,
+      text: lastText,
+      html: lastHtml,
+      elapsed: Date.now() - start
+    };
 
-  logger('Copilot response timed out.');
-  return { text: lastText, html: null };
+  } finally {
+    // Clean up observer
+    if (observerCreated && !observerDisconnected) {
+      await Runtime.evaluate({
+        expression: `(() => {
+          const observer = (window as any).__copilotObserver;
+          if (observer) observer.disconnect();
+          delete (window as any).__copilotObserver;
+          delete (window as any).__copilotLastUpdate;
+        })()`,
+        returnByValue: true
+      }).catch(() => {});
+      observerDisconnected = true;
+    }
+  }
 }

@@ -173,6 +173,18 @@ When a project agent opts into diff automation, Oracle MUST obey the following b
     - If no valid diff is found or the diff is malformed (based on the above checks), Oracle MAY issue a follow‑up prompt (either default or from `--followup-prompt`) and try again up to `--max-retries`.
     - Oracle MUST track `retryCount` and include it in `result.json`.
 
+### Copilot response completion & capture (browser engine)
+
+- **Completion signals** — For Copilot runs, Oracle MUST declare the response complete only after combining these signals:
+  - Stop/Spinner controls have disappeared.
+  - Send button is enabled.
+  - Assistant markdown has stayed stable for a small, configurable number of poll cycles.
+  - A MutationObserver or inactivity check confirms no recent mutations in the assistant message container.
+- **Timeouts** — Default wall‑clock timeout SHOULD be ~90 s. If that limit is reached while some content exists, Oracle MUST return a partial outcome (e.g., `timeout_partial`) and record the completion path (e.g., `all_signals`, `inactivity_fallback`, `forced_timeout`).
+- **Assistant‑scoped capture** — Patch/source extraction MUST scope to the latest assistant turn inside the Copilot conversation container, preferring the per‑turn “Copy” control. DOM fallbacks MUST clone and sanitize the assistant node, removing navigation, sidebar, or tool UI before reading text/HTML.
+- **Sidebar bleed guard** — When sidebar/navigation indicators are detected in the captured source, diff extraction MUST treat the source as contaminated and surface `diff_missing`/`invalid_diff` with a reason such as `sidebar_bleed_detected` instead of emitting a bogus patch.
+- **Observability** — `result.json` SHOULD include `completionPath` (labeling which completion path fired) and a lightweight `copilotSignals`/`metrics` object (e.g., send/stop/spinner flags, stable cycle counts, elapsed ms, whether clipboard or DOM fallback was used) to aid drift debugging.
+
 ---
 
 ## 5. Git Apply / Commit Behavior
@@ -254,6 +266,10 @@ At minimum it MUST contain:
 - `patchBytes`: integer (size of `diff.patch` in bytes).
 - `diffPath`: full path to the diff file or null.
 - `secretScan`: as described above.
+- Optional Copilot diagnostics (when `platform === "copilot"`):
+  - `completionPath`: string label for the completion path used (e.g., `all_signals`, `inactivity_fallback`, `forced_timeout`, `timeout_partial`).
+  - `copilotSignals`/`metrics`: object summarizing completion signals (send/stop/spinner flags, stable cycle counts, elapsed ms, clipboard vs DOM extraction).
+  - `sidebarDetected`: boolean when sidebar/navigation content was detected in `patchSource` and the diff was rejected.
 - Optional diagnostics:
   - `diffScore`, `diffBlocks`, `diffReason`,
   - `gitApplyError`, `gitCommitError`,

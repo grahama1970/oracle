@@ -5,6 +5,9 @@ export interface DiffExtractionResult {
   selectedBlock?: string;
   score?: number;
   reason?: string;
+  sidebarDetected?: boolean;
+  completionPath?: string;
+  signals?: any;
 }
 
 const FENCE_RE = /```[^\n]*\n([\s\S]*?)```/g;
@@ -17,12 +20,55 @@ function stripCarriageReturns(input: string): string {
   return input.replace(/\r\n/g, '\n');
 }
 
-export function extractUnifiedDiff(markdown: string): DiffExtractionResult {
+/**
+ * Check if the patch source contains sidebar/navigation content
+ */
+export function detectSidebarBleed(patchSource: string): { hasBleed: boolean; indicators: string[] } {
+  // Common sidebar indicators from GitHub Copilot interface
+  const sidebarIndicators = [
+    'Pull requests',
+    'Issues',
+    'Marketplace',
+    'Explore',
+    'Navigation',
+    'aria-label',
+    'data-testid',
+    'copilot-sidebar',
+    '.copilot-toolbar',
+    'action-list',
+    '\[role="navigation"\]',
+    'header',
+    'nav'
+  ];
+
+  const foundIndicators: string[] = [];
+  for (const indicator of sidebarIndicators) {
+    if (patchSource.toLowerCase().includes(indicator.toLowerCase())) {
+      foundIndicators.push(indicator);
+    }
+  }
+
+  return {
+    hasBleed: foundIndicators.length > 3, // Require at least 3 indicators for certainty
+    indicators: foundIndicators
+  };
+}
+
+export function extractUnifiedDiff(markdown: string, options?: {
+  completionPath?: string;
+  signals?: any;
+  checkForSidebarBleed?: boolean;
+}): DiffExtractionResult {
   if (!markdown) {
     return { rawBlocks: [], reason: 'empty' };
   }
+
+  // Check for sidebar bleed if requested
+  const bleedCheck = options?.checkForSidebarBleed ? detectSidebarBleed(markdown) : { hasBleed: false, indicators: [] };
+
   const fencedMatches = [...markdown.matchAll(FENCE_RE)];
   const fenced = fencedMatches.map((match) => stripCarriageReturns(match[1].trim()));
+
   if (!fenced.length) {
     const hasPartialFence = markdown.includes('```diff') || markdown.includes('```patch');
     const normalizedFromBeginPatch = normalizeBeginPatch(markdown);
@@ -32,9 +78,27 @@ export function extractUnifiedDiff(markdown: string): DiffExtractionResult {
         selectedBlock: normalizedFromBeginPatch,
         score: 6,
         reason: 'normalized_begin_patch',
+        sidebarDetected: bleedCheck.hasBleed,
+        completionPath: options?.completionPath,
+        signals: options?.signals,
       };
     }
-    return { rawBlocks: [], reason: hasPartialFence ? 'partial_fence' : 'no_fenced_blocks' };
+
+    // If sidebar bleed detected and no valid diffs, indicate potential extraction issue
+    if (bleedCheck.hasBleed) {
+      return {
+        rawBlocks: [],
+        reason: 'sidebar_bleed_detected',
+        sidebarDetected: true,
+        completionPath: options?.completionPath,
+        signals: options?.signals,
+      };
+    }
+
+    return {
+      rawBlocks: [],
+      reason: hasPartialFence ? 'partial_fence' : 'no_fenced_blocks'
+    };
   }
   const scored = fenced
     .map((rawBlock) => {
@@ -65,6 +129,16 @@ export function extractUnifiedDiff(markdown: string): DiffExtractionResult {
     .sort((a, b) => b.score - a.score);
 
   if (!scored.length) {
+    // If sidebar bleed detected with no valid scores, indicate potential extraction issue
+    if (bleedCheck.hasBleed) {
+      return {
+        rawBlocks: [],
+        reason: 'sidebar_bleed_detected',
+        sidebarDetected: true,
+        completionPath: options?.completionPath,
+        signals: options?.signals,
+      };
+    }
     return { rawBlocks: [], reason: 'no_scored_blocks' };
   }
   let best = scored[0];
@@ -83,15 +157,23 @@ export function extractUnifiedDiff(markdown: string): DiffExtractionResult {
     }
   }
 
-  return {
+  // Additional validation: if sidebar bleed detected but we have a valid diff, add warning
+  const result = {
     rawBlocks: scored.map((entry) => entry.block),
     selectedBlock: best.block,
     score: best.score,
-    reason:
-      DIFF_HEADER_RE.test(best.block) && HUNK_RE.test(best.block)
-        ? undefined
-        : 'no_valid_unified_diff',
+    reason: DIFF_HEADER_RE.test(best.block) && HUNK_RE.test(best.block) ? undefined : 'no_valid_unified_diff',
+    sidebarDetected: bleedCheck.hasBleed,
+    completionPath: options?.completionPath,
+    signals: options?.signals,
   };
+
+  // If sidebar bleed detected with no valid diff, invalidate the result
+  if (bleedCheck.hasBleed && (!DIFF_HEADER_RE.test(best.block) || !HUNK_RE.test(best.block))) {
+    result.reason = 'sidebar_bleed_no_valid_diff';
+  }
+
+  return result;
 }
 
 export function isValidUnifiedDiff(diff: string | undefined, strict = false): boolean {

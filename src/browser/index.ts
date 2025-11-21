@@ -226,8 +226,19 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
     }
     // Platform-specific response waiting
     let answer;
+    let copilotMetrics: any = {};
     if (target === 'copilot') {
-      answer = await waitForCopilotResponse(Runtime, config.timeoutMs, logger);
+      answer = await waitForCopilotResponse(Runtime, config.timeoutMs, logger, {
+        timeout: config.timeoutMs,
+        stabilityCheckInterval: 500,
+        requiredStableCycles: 3,
+      });
+      logger(`[browser] Copilot response complete via: ${answer.completionPath}`);
+      copilotMetrics = {
+        completionPath: answer.completionPath,
+        signals: answer.signals,
+        elapsedMs: answer.elapsed
+      };
     } else {
       answer = await waitForAssistantResponse(Runtime, config.timeoutMs, logger);
     }
@@ -276,7 +287,8 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
     const durationMs = Date.now() - startedAt;
     const answerChars = answerText.length;
     const answerTokens = estimateTokenCount(answerMarkdown);
-    return {
+
+    const result: BrowserRunResult = {
       answerText,
       answerMarkdown,
       answerHtml: answerHtml.length > 0 ? answerHtml : undefined,
@@ -290,6 +302,13 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
       snapshots: snapshotPaths.length > 0 ? snapshotPaths : undefined,
       platform: target, // Add platform info to help debugging
     };
+
+    // Add Copilot metrics if available
+    if (target === 'copilot' && copilotMetrics) {
+      (result as any).copilotMetrics = copilotMetrics;
+    }
+
+    return result;
   } catch (error) {
     const normalizedError = error instanceof Error ? error : new Error(String(error));
     stopThinkingMonitor?.();
