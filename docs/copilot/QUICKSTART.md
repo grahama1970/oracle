@@ -18,21 +18,39 @@ xvfb-run -a pnpm tsx tmp/validate-auth-enhanced.ts --quick --headless
 ```
 Expect: “Copilot access: ✅ CHAT READY”. If not, fix auth first (see `auth.md`).
 
-## Human use (manual fallback — tedious copy/paste)
+## 👨 Human use (manual fallback — tedious copy/paste)
 If automation/CLI isn’t available:
 1) Open `docs/copilot/templates/COPILOT_REVIEW_REQUEST_EXAMPLE.md`.
 2) Edit repo/branch/paths and the specific files/areas to review; ensure the branch is committed and pushed so Copilot Web can see it.
 3) In Copilot Web, select GPT‑5 (or another Copilot model), paste the prompt, wait for clarifying answers + diff. Manual copy/paste is slower; prefer the CLI/helper above when possible.
 4) If no diff, re-check that the branch is pushed and retry once.
 
-## Project Agent with Human prompt (one-turn, low risk)
-Recommended: **use the helper** (no bash knowledge needed; copy/paste and run). Ensure your branch is pushed:
-```bash
-git fetch origin && BR=$(git branch --show-current) && git rev-parse --verify "origin/$BR" >/dev/null || { echo "Branch not pushed; ask the human to push before running Copilot."; exit 1; }
-bash docs/copilot/tests/use-copilot.sh docs/copilot/templates/COPILOT_REVIEW_REQUEST_EXAMPLE.md 1 none
+## 🤖👨 Project Agent with Human prompt (one-turn, low risk)
+Prompt-only flow (no bash knowledge needed):
+- Edit the template `docs/copilot/templates/COPILOT_REVIEW_REQUEST_EXAMPLE.md` (repo/branch/paths + focus area). Branch must already be pushed; if not, ask the human to push before running.
+- Run the helper:
+  ```bash
+  bash docs/copilot/tests/use-copilot.sh docs/copilot/templates/COPILOT_REVIEW_REQUEST_EXAMPLE.md 1 none
+  ```
+- Outputs land in `tmp/copilot-review-*.{log,json,patch|no-diff.txt}`. Share the JSON + patch (or no-diff text) with the human.
+
+### Ready-to-paste prompt for the agent (example)
+Use this when instructing the agent (don’t run these commands here):
 ```
-Do not auto-commit or push; if the branch isn’t on the remote, stop and consult the human.
-Explicit CLI (advanced):
+Git commit and push feature branch <branch>.
+Using docs/copilot/templates/COPILOT_REVIEW_REQUEST_EXAMPLE.md, ask Copilot Web (model GPT-5) to review Feature N focusing on:
+- <list the files/paths for Feature N here>
+Ask the clarifying questions in the template and request a unified diff.
+Then run the helper (or equivalent CLI), read Copilot’s response, apply only the diffs you agree with, save artifacts (tmp/copilot-review-*.{log,json,patch|no-diff.txt}), and report back what you applied or declined.
+```
+
+### 🤖 What the agent does (summary)
+- Runs the helper or CLI to send the template prompt to Copilot Web (GPT-5).
+- Waits for clarifying answers + unified diff; saves outputs in `tmp/copilot-review-*`.
+- Applies only the diffs it concurs with; leaves anything risky untouched.
+- Reports back with artifact paths, what was applied, and what was skipped.
+
+Explicit CLI (advanced, same effect):
 ```bash
 ORACLE_NO_DETACH=1 xvfb-run -a pnpm tsx scripts/copilot-code-review.ts \
   docs/copilot/templates/COPILOT_REVIEW_REQUEST_EXAMPLE.md \
@@ -41,10 +59,6 @@ ORACLE_NO_DETACH=1 xvfb-run -a pnpm tsx scripts/copilot-code-review.ts \
   --retry-if-no-diff --max-retries 1 \
   --browser-url https://github.com/copilot/
 ```
-Before running, update the template with repo/branch/paths and the *focus area* (the code you want reviewed).  
-Outputs: `tmp/copilot-review-*.{log,json,patch|no-diff.txt}`. Success looks like `status=success` in the JSON; `diff_missing` means no diff found.
-Return to the human: share the JSON path (e.g., `tmp/copilot-review.json`) and any patch file produced; if `diff_missing`, share the no-diff text file.
-If multiple retries, report the highest-numbered artifact set and the retry count.
 
 ## Project Agent autonomous (guardrails)
 - **Precheck:** run the auth validator above; abort if not ready (non-zero exit).
@@ -79,8 +93,6 @@ Sample JSON (no diff)
 ```json
 {"status":"diff_missing","noDiffOutput":"tmp/copilot-review-no-diff.txt","retryCount":1}
 ```
-- Sample success: `tmp/copilot-review.json` has `"status":"success"` and a `diffOutput` path.
-- Sample no-diff: `"status":"diff_missing"` with `noDiffOutput` path.
 
 ## Integrate downstream
 See `INTEGRATION-PYTHON.md` for the JSON contract used by agents.
