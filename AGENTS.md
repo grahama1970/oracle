@@ -79,7 +79,7 @@ Shared guardrails distilled from the various `~/Projects/*/AGENTS.md` files (sta
 Keep this master file up to date as you notice new rules that recur across repositories, and reflect those updates back into every workspace’s local guardrail documents.
 </shared>
 
-This repository relies on autonomous agents to run the `oracle` CLI safely. When you update the runner or CLI behavior, add a short note here so future agents inherit the latest expectations. These guidelines supplement the existing system/developer instructions. Quick reference: Copilot Web smoke test checklist → `docs/COPILOT_SMOKE_TEST.md`.
+This repository relies on autonomous agents to run the `oracle` CLI safely. When you update the runner or CLI behavior, add a short note here so future agents inherit the latest expectations. These guidelines supplement the existing system/developer instructions. Quick reference: Copilot docs live in `docs/copilot/` (smoke test, browser mode, auth).
 
 ## Current Expectations
 
