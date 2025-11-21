@@ -68,7 +68,7 @@ async function main() {
   const args = process.argv.slice(2);
   let templateArg: string | undefined;
   let modelArg: string | undefined;
-  let maxTurns = 3;
+  let maxTurns = 2;
   let applyMode: 'none' | 'check' | 'apply' = 'none';
   const extraParts: string[] = [];
 
@@ -264,7 +264,8 @@ async function main() {
       } else {
         currentPrompt = [
           'Your previous response did not include a valid unified diff in the requested format.',
-          'Please respond with a single fenced ```diff block containing the patch that satisfies the original constraints.',
+          'Please respond now with a single fenced ```diff block containing the patch that satisfies the original constraints.',
+          'If you need to restate assumptions, do so briefly first, then provide the diff in the same reply.',
         ].join('\n');
       }
     }
