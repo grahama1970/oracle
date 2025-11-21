@@ -127,16 +127,19 @@ async function main() {
     : undefined;
   const desiredModel = resolveDesiredModelLabel(modelArg);
 
+  // Keep the smoke run bounded so it doesn't "hang" on long Copilot responses.
+  const SMOKE_TIMEOUT_MS = 120_000;
+
   const config: BrowserAutomationConfig = {
     chromeProfile,
     chromePath,
     url: 'https://github.com/copilot/',
-    timeoutMs: 900_000,
+    timeoutMs: SMOKE_TIMEOUT_MS,
     inputTimeoutMs: 30_000,
     cookieSync: remoteDebugUrl || remoteDebugPort ? false : true,
-    // Headful debug mode for Copilot POC so we can inspect the DOM.
+    // Headful debug mode for Copilot POC so we can inspect the DOM, but close the browser when done.
     headless: false,
-    keepBrowser: true,
+    keepBrowser: false,
     hideWindow: false,
     remoteDebugUrl,
     remoteDebugPort,
