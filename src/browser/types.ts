@@ -68,6 +68,8 @@ export interface BrowserRunResult {
   answerText: string;
   answerMarkdown: string;
   answerHtml?: string;
+  // Optional raw patch/code source (e.g., from clipboard) when available.
+  patchSource?: string;
   tookMs: number;
   answerTokens: number;
   answerChars: number;

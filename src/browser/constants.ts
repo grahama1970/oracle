@@ -96,3 +96,15 @@ export const STOP_BUTTON_SELECTOR = '[data-testid="stop-button"]';
 export const SEND_BUTTON_SELECTOR = '[data-testid="send-button"]';
 export const MODEL_BUTTON_SELECTOR = '[data-testid="model-switcher-dropdown-button"]';
 export const COPY_BUTTON_SELECTOR = 'button[data-testid="copy-turn-action-button"]';
+
+/**
+ * Spinner/loading indicator shown while Copilot is generating
+ */
+export const COPILOT_SPINNER_SELECTOR =
+  '.copilot-loading-spinner, [data-testid="copilot-spinner"], .animate-spin, [data-loading="true"]';
+
+/**
+ * Container for assistant messages (scoping for extraction)
+ */
+export const COPILOT_ASSISTANT_CONTAINER_SELECTOR =
+  '[data-testid="copilot-chat-conversation"], .copilot-conversation-container, .ConversationView-module__container--XaY36';

@@ -194,7 +194,9 @@ async function main() {
       let patchPath: string | undefined;
       hasDiff = false;
       try {
-        const parsedFiles = parseLenientDiff(answer);
+        // Prefer patchSource (clipboard-based) when available, otherwise use normalized markdown.
+        const diffSource = (result.patchSource && result.patchSource.trim().length > 0) ? result.patchSource : answer;
+        const parsedFiles = parseLenientDiff(diffSource);
 
         if (parsedFiles.length === 0) {
           const noDiffPath = path.join(tmpDir, `${slug}-copilot-review-no-diff.txt`);

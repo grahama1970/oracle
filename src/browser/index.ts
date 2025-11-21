@@ -96,7 +96,7 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
       connectionClosedUnexpectedly = true;
     };
     client.on('disconnect', markConnectionLost);
-    const { Network, Page, Runtime, Input, DOM } = client;
+    const { Network, Page, Runtime, Input, DOM, Browser } = client;
 
     if (!config.headless && config.hideWindow) {
       await hideChromeWindow(chrome, logger);
@@ -235,10 +235,18 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
     answerText = answer.text;
     answerHtml = answer.html ?? '';
 
+    let patchSource: string | null = null;
     let copiedMarkdown: string | null = null;
     if (target === 'copilot') {
-      // Copilot pages do not expose a reliable copy button; use the stabilized text/html snapshot.
-      copiedMarkdown = answerText || answerHtml || null;
+      // Prefer clipboard-based extraction when available, then fall back to DOM snapshot text.
+      patchSource = await extractCopilotClipboardPatch({ Runtime, Browser }, logger);
+      if (!patchSource || patchSource.trim().length < 10) {
+        logger('[browser] Clipboard extraction empty; falling back to DOM snapshot text.');
+        patchSource = answerText || answerHtml || null;
+      } else {
+        logger('[browser] Using clipboard patch source for diff extraction.');
+      }
+      copiedMarkdown = patchSource ?? answerText ?? null;
     } else {
       copiedMarkdown = await withRetries(
         async () => {
@@ -272,6 +280,7 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
       answerText,
       answerMarkdown,
       answerHtml: answerHtml.length > 0 ? answerHtml : undefined,
+      patchSource: patchSource ?? undefined,
       tookMs: durationMs,
       answerTokens,
       answerChars,
@@ -354,6 +363,83 @@ export {
   ensureCopilotPromptReady,
   waitForCopilotResponse,
 } from './pageActions.js';
+
+async function extractCopilotClipboardPatch(
+  domains: { Runtime: ChromeClient['Runtime']; Browser?: ChromeClient['Browser'] },
+  logger: BrowserLogger,
+): Promise<string | null> {
+  const { Runtime, Browser } = domains;
+
+  // Try to grant clipboard permissions when Browser domain is available.
+  if (Browser && typeof Browser.grantPermissions === 'function') {
+    try {
+      await Browser.grantPermissions({ permissions: ['clipboardRead', 'clipboardWrite'] });
+    } catch {
+      logger('[browser] Clipboard permission grant failed; continuing anyway.');
+    }
+  }
+
+  try {
+    const { result } = await Runtime.evaluate({
+      expression: `(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        const seen = new Set();
+
+        const thread = document.querySelector('[data-testid="chat-thread"], main[role="main"]');
+        if (!thread) return { error: 'no_thread' };
+
+        const messages = Array.from(
+          thread.querySelectorAll('[data-testid="message-assistant"], [data-message-role="assistant"]'),
+        );
+        const lastMsg = messages.at(-1);
+        if (!lastMsg) return { error: 'no_message' };
+
+        const copyButtons = Array.from(
+          lastMsg.querySelectorAll(
+            'button[aria-label="Copy"], button[aria-label="Copy code"], button[class*="CopyButton"], button .octicon-copy',
+          ),
+        ).map((btn) => (btn.closest('button') ?? btn));
+
+        if (!copyButtons.length) return { error: 'no_copy_buttons' };
+
+        let combined = '';
+        for (const btn of copyButtons) {
+          try {
+            btn.focus();
+            btn.click();
+            await wait(100);
+            const text = await navigator.clipboard.readText();
+            if (text && text.trim().length > 0) {
+              const trimmed = text.trimEnd();
+              if (!seen.has(trimmed)) {
+                seen.add(trimmed);
+                combined += trimmed + '\\n\\n';
+              }
+            }
+          } catch (e) {
+            return { error: 'clipboard_access_denied', details: String(e) };
+          }
+        }
+
+        return combined.trim().length > 0 ? { success: true, text: combined.trimEnd() } : { error: 'empty' };
+      })()`,
+      awaitPromise: true,
+      returnByValue: true,
+    });
+
+    const value = result?.value as { success?: boolean; text?: string; error?: string } | undefined;
+    if (value && value.success && value.text) {
+      return value.text;
+    }
+    if (value?.error && value.error !== 'no_copy_buttons') {
+      logger(`[browser] Clipboard extraction failed: ${value.error}`);
+    }
+  } catch {
+    // Swallow clipboard extraction failures; caller will fall back.
+  }
+
+  return null;
+}
 
 function isWebSocketClosureError(error: Error): boolean {
   const message = error.message.toLowerCase();

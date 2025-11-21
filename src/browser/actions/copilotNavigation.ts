@@ -267,404 +267,123 @@ export async function waitForCopilotReady(
 }
 
 /**
- * Wait for Copilot response completed (with better selectors)
+ * Wait for Copilot response completed using robust signals + inactivity fallback.
  */
 export async function waitForCopilotResponse(
   Runtime: ChromeClient['Runtime'],
   timeoutMs: number,
-  logger: BrowserLogger
+  logger: BrowserLogger,
 ): Promise<{ text: string; html: string | null }> {
   logger('Waiting for Copilot response...');
   const started = Date.now();
+  const pollIntervalMs = 1000;
 
-  // We mirror the ChatGPT "wait until stable" behavior: poll a small snapshot
-  // (isTyping + markdown text) and only capture once it stabilizes.
-  // Keep polling snappy, but require a couple of stable cycles.
-  const pollIntervalMs = 400;
-  const requiredStableCycles = 2;
-  const softCompleteAfterMs = 45_000;
-  const fallbackAfterMs = 30_000;
-  const minCharsForLongAnswer = 800;
-  const longAnswerStableCycles = 1;
-  const earlyUiDoneFallbackMs = 8_000;
-  const minCharsForEarlyExit = 400;
-  let stableCycles = 0;
+  const MIN_CHARS_FOR_VALID_RESPONSE = 20;
+  const INACTIVITY_THRESHOLD_MS = 6000;
+  const HARD_TIMEOUT_MS = timeoutMs;
+
   let lastText = '';
-  let baselineText = '';
-  let seenNewText = false;
-  let lastChangeAt = started;
-  let lastSnapshot: { text: string; html: string; isTyping: boolean; chars: number } = {
-    text: '',
-    html: '',
-    isTyping: true,
-    chars: 0,
-  };
+  let lastChangeTime = Date.now();
 
-  // Unified helper to ensure all successful exits emit both required log lines.
-  const finalizeReturn = (
-    textOut: string,
-    htmlOut: string | null,
-    reason: string,
-    stabilized: boolean = true,
-  ) => {
-    if (stabilized) {
-      logger(`Copilot snapshot stabilized${reason ? ` (${reason})` : ''}`);
-    }
-    logger(`Copilot response complete ✓${reason ? ` (${reason})` : ''}`);
-    return { text: textOut, html: htmlOut };
-  };
+  while (Date.now() - started < HARD_TIMEOUT_MS) {
+    const { result } = await Runtime.evaluate({
+      expression: `(() => {
+        const scope =
+          document.querySelector('${COPILOT_CONVERSATION_SCOPE_SELECTOR}') ||
+          document.querySelector('[data-testid="chat-thread"], main[role="main"]');
+        if (!scope) return { status: 'no-scope', chars: 0 };
 
-  const snapshotExpr = `(() => {
-    // Robust snapshot logic: prioritize assistant patch blocks, avoid brittle class hashes.
+        const allMsgs = Array.from(
+          scope.querySelectorAll('.markdown-body, [data-message-role="assistant"]'),
+        );
+        const latestMsg = allMsgs.length ? allMsgs[allMsgs.length - 1] : null;
 
-    // --- CONFIG ---
-    const SEL = {
-      scope: [
-        '[data-testid="chat-thread"]',
-        '[data-conversation]',
-        'main[role="main"]',
-        '.chat-input-wrapper',
-        '[class*="ConversationView-module__container"]'
-      ],
-      message: [
-        '[data-testid="message-assistant"]',
-        '[data-message-role="assistant"]',
-        'div[class*="ChatMessage-module__chatMessage"][class*="ai"]',
-        'div[class*="assistant"]'
-      ],
-      markdown: [
-        '[data-component="Markdown"]',
-        '[class*="markdown-body"]',
-        '.markdown-body',
-        '[data-copilot-markdown]'
-      ],
-      codeContainer: [
-        '[class*="CodeBlock-module__container"]',
-        'div[class*="CodeBlock"]',
-        'pre',
-        'figure'
-      ],
-      stopIcon: [
-        'button[aria-label="Stop generating"]',
-        '.octicon-stop',
-        'svg[class*="octicon-stop"]'
-      ],
-      sendIcon: [
-        'button[aria-label="Send now"]',
-        '.octicon-paper-airplane',
-        'svg[class*="octicon-paper-airplane"]',
-        '[data-testid="send-button"]'
-      ],
-      loadingIndicator: [
-        '[data-loading="true"]',
-        '.animate-spin'
-      ]
-    };
+        let text = '';
+        let html = '';
+        if (latestMsg) {
+          const clone = latestMsg.cloneNode(true);
+          clone.querySelectorAll('button, .sr-only').forEach((el) => el.remove());
+          text = (clone.innerText || '').trim();
+          html = (latestMsg as HTMLElement).innerHTML;
+        }
 
-    function extractText(root) {
-      if (!root) return '';
-      const clone = root.cloneNode(true);
-      const trash = clone.querySelectorAll(
-        'button, [role="button"], .sr-only, [aria-label="Copy"]',
-      );
-      trash.forEach((el) => el.remove());
-      return (clone.innerText || '').trim();
-    }
+        const sel = {
+          stop: [
+            'button[aria-label="Stop generating"]',
+            '.octicon-stop',
+            '[data-testid="stop-button"]',
+          ],
+          send: [
+            'button[aria-label="Send now"]',
+            '.octicon-paper-airplane',
+            '[data-testid="send-button"]',
+            'button[type="submit"]:not([disabled])',
+          ],
+          spinner: ['[data-loading="true"]', '.animate-spin', 'svg[class*="anim-rotate"]'],
+        };
 
-    const debug = {
-      scopeFound: false,
-      latestFound: false,
-      candidateMarkdownBodies: 0,
-      firstCandidatePreview: '',
-      chosenPreview: '',
-    };
+        const find = (arr: string[]) => arr.some((s) => !!document.querySelector(s));
 
-    // 1. Conversation scope
-    let scope: Element | null = null;
-    for (const s of SEL.scope) {
-      scope = document.querySelector(s);
-      if (scope) {
-        debug.scopeFound = true;
-        break;
+        const hasStop = find(sel.stop);
+        const hasSpinner = find(sel.spinner);
+        const hasSend = find(sel.send);
+
+        const isBusy = hasStop || hasSpinner;
+
+        return {
+          status: 'ok',
+          text,
+          html,
+          isBusy,
+          hasSend,
+          hasStop,
+          hasSpinner,
+          chars: text.length,
+        };
+      })()`,
+      returnByValue: true,
+    });
+
+    const state = result.value || {};
+    const now = Date.now();
+
+    if (state.status === 'ok') {
+      if (state.text !== lastText) {
+        lastChangeTime = now;
+        lastText = state.text;
       }
-    }
+      const timeSinceLastChange = now - lastChangeTime;
 
-    // 2. Latest assistant message
-    let latestMsg: Element | null = null;
-    if (scope) {
-      let candidates: Element[] = [];
-      for (const s of SEL.message) {
-        const found = Array.from(scope.querySelectorAll(s));
-        if (found.length) {
-          candidates = candidates.concat(found);
+      if ((now - started) % 3000 < 1000) {
+        logger(
+          `[poll] chars=${state.text.length}, busy=${state.isBusy} (stop=${state.hasStop}, spin=${state.hasSpinner}), sendVisible=${state.hasSend}, stable=${(
+            timeSinceLastChange / 1000
+          ).toFixed(1)}s`,
+        );
+      }
+
+      if (state.hasSend && !state.isBusy) {
+        if (timeSinceLastChange > 1000 && state.text.length > MIN_CHARS_FOR_VALID_RESPONSE) {
+          logger('Copilot response complete (UI Signal: Send Icon).');
+          return { text: state.text, html: state.html };
         }
       }
-      if (candidates.length) {
-        latestMsg = candidates[candidates.length - 1]!;
-        debug.latestFound = true;
+
+      if (
+        !state.isBusy &&
+        state.text.length > MIN_CHARS_FOR_VALID_RESPONSE &&
+        timeSinceLastChange > INACTIVITY_THRESHOLD_MS
+      ) {
+        logger(
+          `Copilot response complete (Inactivity Fallback: stable for ${INACTIVITY_THRESHOLD_MS}ms).`,
+        );
+        return { text: state.text, html: state.html };
       }
     }
 
-    // 3. Extract content, prioritizing patch blocks
-    let finalText = '';
-    let finalHtml = '';
-
-    if (latestMsg) {
-      const codeContainers = Array.from(
-        latestMsg.querySelectorAll(SEL.codeContainer.join(',')),
-      );
-      const patchBlock = codeContainers.find((el) =>
-        (el.innerText || '').includes('*** Begin Patch'),
-      );
-
-      if (patchBlock) {
-        finalText = extractText(patchBlock);
-        finalHtml = patchBlock.innerHTML;
-      } else {
-        const md =
-          latestMsg.querySelector(SEL.markdown.join(',')) || latestMsg;
-        if (md) {
-          finalText = extractText(md);
-          finalHtml = (md as HTMLElement).innerHTML || '';
-        }
-      }
-    }
-
-    // 4. Debug-only global scan
-    if (!finalText) {
-      const globalMd = document.querySelectorAll(SEL.markdown.join(','));
-      debug.candidateMarkdownBodies = globalMd.length;
-      if (globalMd.length > 0) {
-        const last = globalMd[globalMd.length - 1]!;
-        debug.firstCandidatePreview = (last.innerText || '').substring(0, 120);
-      }
-    }
-
-    debug.chosenPreview = finalText.substring(0, 120);
-
-    // 5. Completion / typing detection
-    let isTyping = true;
-    let loadingAttr: string | null = null;
-
-    const stopBtn = document.querySelector(SEL.stopIcon.join(','));
-    const sendBtn = document.querySelector(SEL.sendIcon.join(','));
-    const spinner = document.querySelector(SEL.loadingIndicator.join(','));
-
-    const toolbar = sendBtn ? sendBtn.closest('[class*="ChatInput-module__toolbar"]') : null;
-    if (toolbar) {
-      loadingAttr = toolbar.getAttribute('data-loading');
-    }
-
-    const hasStopIcon = !!stopBtn;
-    const hasAirplane =
-      !!sendBtn && (sendBtn as HTMLElement).getBoundingClientRect().width > 0;
-    const isSpinnerActive = !!spinner;
-
-    if (hasAirplane && !isSpinnerActive) {
-      isTyping = false;
-    } else if (hasStopIcon || isSpinnerActive) {
-      isTyping = true;
-    }
-
-    return {
-      text: finalText,
-      html: finalHtml,
-      isTyping,
-      chars: finalText.length,
-      hasMarkdown: finalText.length > 0,
-      hasAirplane,
-      hasStopIcon,
-      loadingAttr,
-      scopeFound: debug.scopeFound,
-      latestFound: debug.latestFound,
-      globalMarkdownFound: debug.candidateMarkdownBodies > 0,
-      debugCandidates: debug.candidateMarkdownBodies,
-      debugPreview: debug.firstCandidatePreview,
-      debugChosen: debug.chosenPreview,
-    };
-  })()`;
-
-  let firstLongAnswerAt: number | null = null;
-
-  while (Date.now() - started < timeoutMs) {
-    const snapResult = await Runtime.evaluate({ expression: snapshotExpr, returnByValue: true });
-    const snap = snapResult.result?.value || {};
-    const debugSnap = snap as any;
-    const text: string = typeof snap.text === 'string' ? snap.text : '';
-    const html: string = typeof snap.html === 'string' ? snap.html : '';
-    let isTyping: boolean = Boolean(snap.isTyping);
-    const chars: number = Number.isFinite((snap as any).chars) ? Number((snap as any).chars) : text.length;
-    const containsNav: boolean = Boolean((snap as any).containsNav);
-    const hasMarkdown: boolean = Boolean((snap as any).hasMarkdown);
-    const hasAirplane: boolean = Boolean((snap as any).hasAirplane);
-    const loadingAttr: string | null = typeof (snap as any).loadingAttr === 'string' ? (snap as any).loadingAttr : null;
-    const hasStopIcon: boolean = Boolean((snap as any).hasStopIcon);
-    const scopeFound: boolean = Boolean((snap as any).scopeFound);
-    const latestFound: boolean = Boolean((snap as any).latestFound);
-    const globalMarkdownFound: boolean = Boolean((snap as any).globalMarkdownFound);
-
-    const loadingActive = Boolean(loadingAttr && loadingAttr !== 'false');
-    const sendIconVisible = hasAirplane;
-    const uiDone = sendIconVisible && !loadingActive;
-    const navRegex = /Toggle sidebar|New chat|Manage chat|Agents|Quick links|Spaces|SparkPreview|Open workbench|WorkBench|Share/i;
-    const looksLikeChrome = navRegex.test(text) || text.length > 5000;
-
-    const elapsed = Date.now() - started;
-
-    // Debug logging per your spec: elapsed, chars, flags, isTyping, uiDone
-    if (elapsed % 5000 < pollIntervalMs || lastText !== text) {
-      logger(`[poll] elapsed=${elapsed}ms, chars=${chars}, scopeFound=${scopeFound}, latestFound=${latestFound}, globalMarkdownFound=${globalMarkdownFound}, isTyping=${isTyping}, uiDone=${uiDone}`);
-    }
-
-    // Enhanced logging for issues when chars=0
-    if (chars === 0) {
-      logger(
-        `[hang-debug] scopeFound=${debugSnap.scopeFound}, latestFound=${debugSnap.latestFound}, candidates=${debugSnap.debugCandidates}`,
-      );
-      logger(
-        `[hang-debug] preview="${String(debugSnap.debugPreview ?? '').substring(
-          0,
-          200,
-        )}", chosen="${String(debugSnap.debugChosen ?? '').substring(0, 200)}"`,
-      );
-    }
-
-    // Double-check by re-reading markdown once UI says done.
-    let confirmText = text;
-    if (!looksLikeChrome && uiDone && hasMarkdown) {
-      const confirm = await Runtime.evaluate({
-        expression: `(() => {
-          const scope = document.querySelector('${COPILOT_CONVERSATION_SCOPE_SELECTOR}');
-          if (!scope) return '';
-          const selectors = ${JSON.stringify(COPILOT_MESSAGE_SELECTORS)};
-          let latest = null;
-          for (const sel of selectors) {
-            const found = Array.from(scope.querySelectorAll(sel));
-            if (found.length) { latest = found.at(-1); break; }
-          }
-          if (!latest || !scope.contains(latest)) return '';
-          const md = latest.querySelector('${COPILOT_MARKDOWN_BODY_SELECTOR}');
-          if (!md) return '';
-          return (md.innerText || '').trim();
-        })()`,
-        returnByValue: true,
-      });
-      confirmText = typeof confirm.result?.value === 'string' ? (confirm.result.value as string) : '';
-      if (navRegex.test(confirmText) || confirmText.length === 0) {
-        // Treat as still typing to avoid capturing chrome.
-        isTyping = true;
-      }
-    }
-
-    const patchMarkersPresent = /(\*\*\*\s*Begin Patch|diff --git|@@ -\d+,\d+ \+\d+,\d+ @@|```diff|```patch|\*\*\*\s*Update File)/i.test(
-      confirmText,
-    );
-
-    // Early exit if we detect patch markers and have reasonable content
-    if (patchMarkersPresent && chars > 50 && !isTyping) {
-      logger(`[patch-detected] Early exit: Patch markers found (${chars} chars, isTyping=${isTyping})`);
-      return finalizeReturn(confirmText, html, 'early patch-detected');
-    }
-
-    // Another early exit for UI completion with substantial content, skip stability checks
-    if ((uiDone || sendIconVisible) && hasMarkdown && chars > 100 && !containsNav && chars < 2000) {
-      logger(
-        `[content-ready] Early exit: UI done with ${chars} chars (${chars < 800 ? 'short' : 'medium'} answer)`,
-      );
-      return finalizeReturn(confirmText, html, 'content-ready');
-    }
-
-    if (confirmText.length > 800 && !firstLongAnswerAt) {
-      firstLongAnswerAt = Date.now();
-      logger(`waitForCopilotResponse: observed long Copilot answer (~${confirmText.length} chars)`);
-    }
-
-    // Track meaningful changes to the assistant response.
-    if (text && text !== baselineText) {
-      baselineText = text;
-      seenNewText = true;
-      stableCycles = 0;
-      lastChangeAt = Date.now();
-      lastSnapshot = { text, html, isTyping, chars };
-    } else if (seenNewText) {
-      stableCycles += 1;
-    }
-
-    // NEW EARLY EXIT: Send icon shown with non-empty markdown - return immediately
-    if (sendIconVisible && text.length > 0) {
-      logger(
-        `[immediate-exit] Send icon shown with ${text.length} chars (loadingAttr=${loadingAttr ?? 'null'}) - returning`,
-      );
-      return finalizeReturn(text, html, 'send-icon-visible');
-    }
-
-    if (!isTyping && (uiDone || sendIconVisible) && hasMarkdown && confirmText.length > 0) {
-      const enoughStableCycles =
-        chars >= minCharsForLongAnswer
-          ? stableCycles >= longAnswerStableCycles
-          : stableCycles >= requiredStableCycles;
-
-      // If UI shows "done" and we have non-empty markdown, exit immediately.
-      if (chars >= minCharsForEarlyExit) {
-        return finalizeReturn(confirmText, html, 'ui-done-immediate');
-      }
-
-      // UI reports done + non-empty markdown: bail out immediately to avoid hangs.
-      if (stableCycles === 0 && elapsed > 2_000) {
-        return finalizeReturn(confirmText, html, 'ui-done-immediate');
-      }
-
-      // Heuristic: if the text contains explicit patch markers, accept sooner.
-      if (patchMarkersPresent && (stableCycles >= 1 || elapsed > earlyUiDoneFallbackMs)) {
-        return finalizeReturn(confirmText, html, 'early patch heuristic (markers)');
-      }
-
-      // Standard stability path.
-      if (enoughStableCycles) {
-        return finalizeReturn(confirmText, html, 'standard stability');
-      }
-
-      // Inactivity fallback: UI done + no changes for a while.
-      if (elapsed - lastChangeAt > earlyUiDoneFallbackMs / 2 && chars > 100) {
-        return finalizeReturn(confirmText, html, 'inactivity fallback');
-      }
-
-      // Safety valve: if UI says done and we have non-empty markdown,
-      // do not wait indefinitely for perfect stability.
-      if (elapsed > 15_000 && chars > minCharsForEarlyExit) {
-        return finalizeReturn(confirmText, html, 'late ui-done safety');
-      }
-    } else {
-      stableCycles = 0;
-      lastText = confirmText || lastText;
-    }
-
-    if (
-      firstLongAnswerAt &&
-      elapsed - firstLongAnswerAt >= softCompleteAfterMs &&
-      confirmText &&
-      !navRegex.test(confirmText)
-    ) {
-      logger(
-        `Copilot response fallback: using latest assistant markdown after ${Math.round(
-          (elapsed - firstLongAnswerAt) / 1000,
-        )}s without strict stability`,
-      );
-      return finalizeReturn(confirmText, html, 'soft-complete long-answer', true);
-    }
-
-    if (seenNewText && elapsed >= fallbackAfterMs && elapsed - lastChangeAt >= fallbackAfterMs / 3 && lastSnapshot.text) {
-      logger('Copilot response fallback: using latest assistant markdown after stability timeout', {
-        elapsedMs: elapsed,
-        chars: lastSnapshot.chars,
-      });
-      return finalizeReturn(lastSnapshot.text, lastSnapshot.html, 'stability timeout fallback');
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    await delay(pollIntervalMs);
   }
 
-  logger('Copilot response timeout');
-  // Fail closed: do not return sidebar chrome as a "response".
-  return { text: '', html: null };
+  logger('Copilot response timed out.');
+  return { text: lastText, html: null };
 }

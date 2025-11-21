@@ -11,9 +11,16 @@ export interface DiffFile {
 }
 
 function isSafePath(p: string): boolean {
-  if (!p || p.trim() === '/dev/null') return true;
+  if (!p) return false;
+  if (p.trim() === '/dev/null') return true;
   const normalized = path.normalize(p);
-  return !path.isAbsolute(normalized) && !normalized.startsWith('..') && !normalized.includes('\0');
+  return (
+    !path.isAbsolute(normalized) &&
+    !normalized.startsWith('..') &&
+    !normalized.includes('../') &&
+    !normalized.includes('..\\') &&
+    !normalized.includes('\0')
+  );
 }
 
 function cleanDiffPath(p: string): string {
@@ -29,13 +36,22 @@ export function parseLenientDiff(text: string): DiffFile[] {
   let currentFile: DiffFile | null = null;
   let currentHunk: DiffHunk | null = null;
 
+  // Regex matchers
   const RE_GIT_HEADER = /^diff --git a\/(.*) b\/(.*)/;
   const RE_UPDATE_FILE = /^\*\*\*\s*Update File:\s*(.*)/i;
   const RE_TRIPLE_MINUS = /^---\s+(?:a\/)?(.*)/;
   const RE_HUNK_HEADER = /^@@\s*-[0-9,]+\s+\+[0-9,]+\s*@@/;
+  const RE_NOISE_UPDATE = /^\*\*\*\s*UpdatePatch/i;
+  const RE_BEGIN_PATCH = /\*\*\*\s*Begin Patch/i;
+  const RE_END_PATCH = /\*\*\*\s*End Patch/i;
 
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i]!;
+
+    // Skip known noise markers from Copilot artifacts.
+    if (RE_NOISE_UPDATE.test(line) || RE_BEGIN_PATCH.test(line) || RE_END_PATCH.test(line)) {
+      continue;
+    }
 
     let newPath: string | null = null;
 
@@ -63,19 +79,37 @@ export function parseLenientDiff(text: string): DiffFile[] {
       continue;
     }
 
-    if (!currentFile) continue;
-
     if (RE_HUNK_HEADER.test(line)) {
-      currentHunk = { header: line.trim(), lines: [] };
-      currentFile.hunks.push(currentHunk);
-      continue;
+      // If we see a hunk before a file header, attach it to the last file as a fallback.
+      if (!currentFile && files.length > 0) {
+        currentFile = files[files.length - 1]!;
+      }
+      if (currentFile) {
+        currentHunk = { header: line.trim(), lines: [] };
+        currentFile.hunks.push(currentHunk);
+        continue;
+      }
     }
 
+    if (!currentFile) continue;
+
     if (currentHunk) {
-      if (/^[+\- ]/.test(line) || line.trim() === '') {
-        currentHunk.lines.push(line);
-      } else if (line.startsWith('```') || line.startsWith('*** End')) {
+      // Terminate hunk when we hit an obvious boundary (new file header, fenced block).
+      if (RE_GIT_HEADER.test(line) || RE_UPDATE_FILE.test(line) || line.startsWith('```')) {
         currentHunk = null;
+        continue;
+      }
+
+      const trimmed = line.trim();
+
+      if (/^[+\- ]/.test(line) || trimmed === '') {
+        currentHunk.lines.push(line);
+      } else if (line.includes('Loadingsrc/') || line.includes('Loading...')) {
+        // Skip spinner / loading noise lines without breaking the hunk.
+        continue;
+      } else if (!line.startsWith('***')) {
+        // Leniently treat non-prefixed lines as context to cope with missing space prefixes.
+        currentHunk.lines.push(` ${line}`);
       }
     }
   }
@@ -99,4 +133,3 @@ export function reconstructUnifiedDiff(files: DiffFile[]): string {
 
   return parts.join('\n');
 }
-
