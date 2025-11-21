@@ -126,6 +126,7 @@ docs/copilot/
 ├── templates/             ← Prompt templates (review request, etc.)
 ├── tests/                 ← Copilot browser tests/scripts (lean set)
 ├── deprecated/            ← Deprecated summaries (PROGRESS_SUMMARY, SOLUTION_README)
+├── troubleshooting/       ← Full troubleshooting guides
 ├── legacy/                ← Historical docs
 │   ├── troubleshooting/
 │   └── ...
@@ -156,6 +157,9 @@ pnpm tsx scripts/browser-tools.ts inspect --port <PORT>
 # Send a Copilot review request using the template
 oracle --engine browser --copilot --model gpt-5 \
   --prompt "$(cat docs/copilot/templates/COPILOT_REVIEW_REQUEST_EXAMPLE.md)"
+
+# CI smoke (manual dispatch, requires COPILOT_PROFILE_TGZ secret)
+gh workflow run copilot-smoke.yml
 ```
 
 ---

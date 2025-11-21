@@ -1,46 +1,88 @@
 # Quickstart (Copilot Browser Flow)
 
-1) **Install deps**  
-   ```bash
-   pnpm install
-   ```
+## Setup (mac/win/linux)
+- Run from repo root: `/home/graham/workspace/experiments/oracle`.
+- Install deps: `pnpm install` (Node 20+).
+- Chrome available (set `CHROME_PATH` if needed).
+- `xvfb-run` for headless:
+  - Ubuntu/Debian: `sudo apt-get install -y xvfb`
+  - macOS: run headful or install XQuartz + `xvfb` via Homebrew
+  - Windows/WSL: use `xvfb-run` in WSL or run headful on Windows Chrome
+- Authenticated Copilot profile at `~/.oracle/chrome-profile` (see `auth.md` to set this up).
+- Use GPT‑5; default turns = 1.
+- Copilot model picker (observed): GPT‑4.1, GPT‑5, GPT‑4o, GPT‑5.1 Preview, Claude Sonnet 4, Claude Sonnet 4.5, Claude Haiku 4.5. We target GPT‑5 by default.
 
-2) **Ensure Chrome profile is authenticated**  
-   Profile path: `~/.oracle/chrome-profile` (shared by Oracle runs).  
-   Validate quickly (headless OK):  
-   ```bash
-   xvfb-run -a pnpm tsx tmp/validate-auth-enhanced.ts --quick --headless
-   ```
-   You should see “Copilot access: ✅ CHAT READY”.
+### Validate auth (required before any run)
+```bash
+xvfb-run -a pnpm tsx tmp/validate-auth-enhanced.ts --quick --headless
+```
+Expect: “Copilot access: ✅ CHAT READY”. If not, fix auth first (see `auth.md`).
 
-3) **Run the smoke test (single turn)**  
-   ```bash
-   ORACLE_NO_DETACH=1 xvfb-run -a pnpm tsx scripts/copilot-code-review.ts docs/smoke/prompt.md \
-     --apply-mode none --model gpt-5
-   ```
-   Expected artifacts: unified diff + clarifying answers in `docs/smoke/response_oracle.md`. Compare against `docs/smoke/response_web.md`.
+## Human use (manual in Copilot Web)
+1) Open `docs/copilot/templates/COPILOT_REVIEW_REQUEST_EXAMPLE.md`.
+2) Edit repo/branch/paths **and describe the specific files/areas you want reviewed** (the template is meant to focus Copilot on the code you and the agent care about). Ensure that branch is committed and pushed so Copilot Web can see it.
+3) In Copilot Web, pick GPT‑5 (or another Copilot-provided model if you choose), paste the prompt, wait for clarifying answers + diff. Copilot Web can read your public/private repo for that branch, so you avoid manual file copy/paste.
+4) If no diff, ensure the branch is pushed and retry once.
 
-4) **Human opt-in for a second turn (optional)**  
-   Add `--max-turns 2` to the command above if you want a follow-up turn; default is 1 to keep automation stable.
+## Project Agent with Human prompt (one-turn, low risk)
+Recommended: bash helper (simple, MCP-free). Make sure the branch with your changes is committed and pushed so Copilot can see the code:
+```bash
+# verify branch is pushed
+git fetch origin
+BR=$(git branch --show-current)
+git rev-parse --verify "origin/$BR" >/dev/null || { echo "Branch not pushed"; exit 1; }
 
-5) **Troubleshooting**  
-   - Model chip not GPT‑5? Rerun after selecting GPT‑5 manually.  
-   - Auth issues? See `auth.md` for authentication setup, or `legacy/GITHUB_COPILOT_AUTH_COMPLETE_GUIDE.md` for detailed historical guide.  
-   - Hanging at completion? Review logs in `tmp/` and see `troubleshooting.md` for solutions.
+bash docs/copilot/tests/use-copilot.sh docs/copilot/templates/COPILOT_REVIEW_REQUEST_EXAMPLE.md 1 none
+```
+Equivalent CLI (explicit flags):
+```bash
+ORACLE_NO_DETACH=1 xvfb-run -a pnpm tsx scripts/copilot-code-review.ts \
+  docs/copilot/templates/COPILOT_REVIEW_REQUEST_EXAMPLE.md \
+  --apply-mode none --model gpt-5 --max-turns 1 \
+  --json-output tmp/copilot-review.json --timeout-ms 180000 \
+  --retry-if-no-diff --max-retries 1 \
+  --browser-url https://github.com/copilot/
+```
+Before running, update the template with repo/branch/paths and the *focus area* (the code you want reviewed).  
+Outputs: `tmp/copilot-review-*.{log,json,patch|no-diff.txt}`. Success looks like `status=success` in the JSON; `diff_missing` means no diff found.
+Return to the human: share the JSON path (e.g., `tmp/copilot-review.json`) and any patch file produced; if `diff_missing`, share the no-diff text file.
+If multiple retries, report the highest-numbered artifact set and the retry count.
 
-6) **Integrate downstream**  
-   The JSON contract for consuming diffs/answers is in `INTEGRATION-PYTHON.md`.
+## Project Agent autonomous (guardrails)
+- **Precheck:** run the auth validator above; abort if not ready (non-zero exit).
+- **Branch visibility:** ensure repo/branch in the template is pushed and visible to Copilot:
+  ```bash
+  BR=$(git branch --show-current)
+  git ls-remote --heads origin "$BR" >/dev/null || { echo "Branch not on origin"; exit 1; }
+  ```
+- **Timeout & turns:** keep `--max-turns 1`; set `--timeout-ms 180000` by default.
+- **Model check:** ensure logs show model chip GPT‑5; abort/retry if mismatched.
+- **Command:** same as above with `--json-output tmp/copilot-review.json --timeout-ms 180000 --retry-if-no-diff --max-retries 1 --browser-url https://github.com/copilot/`.
+- **Exit policy:** if auth validation fails, model chip != GPT‑5, or JSON `status` ∈ {`diff_missing`,`timeout`,`error`} after retries → abort and surface the log path and JSON result.
 
-7) **Use the Copilot review template (copy/paste ready)**  
-   - **Human (manual in Copilot Web):** open the template `docs/copilot/templates/COPILOT_REVIEW_REQUEST_EXAMPLE.md`, fill in repo/branch/paths, then paste into Copilot Web (picker on GPT‑5). Wait for the answer + diff.  
-   - **Agent via CLI (Oracle):** run the template directly:  
-     ```bash
-     ORACLE_NO_DETACH=1 xvfb-run -a pnpm tsx scripts/copilot-code-review.ts \
-       docs/copilot/templates/COPILOT_REVIEW_REQUEST_EXAMPLE.md \
-       --apply-mode none --model gpt-5
-     ```  
-   - **Agent via bash helper:** use the bundled script (defaults to the template):  
-     ```bash
-     bash docs/copilot/tests/use-copilot.sh docs/copilot/templates/COPILOT_REVIEW_REQUEST_EXAMPLE.md 1 none
-     ```  
-   Keep `--max-turns` at 1 unless you intentionally need a follow-up turn.
+Status → action (after retries)
+- `success`: proceed; use `diffOutput` and patch.
+- `diff_missing` / `timeout` / `error`: stop, report log + JSON to human.
+
+## Troubleshooting (quick)
+- Marketing/login page: rerun auth (see `auth.md`), re-validate. Details: `troubleshooting/COPILOT_AUTH_TROUBLESHOOTING.md`.
+- Model chip not GPT‑5: select GPT‑5 manually, rerun. Selector/helpers: `troubleshooting/COPILOT_BROWSER_DEBUG.md`.
+- Hangs/no completion: check `tmp/copilot-review-*.log`; see `troubleshooting/COPILOT_RESPONSE_FIX_SUMMARY.md` and `troubleshooting/COPLIOT_HANG_FIX.md`.
+- No diff: confirm template repo/branch/paths edited and branch is pushed; retry with `--max-turns 2`.
+- Sample success: `tmp/copilot-review.json` contains `"status":"success"` and `diffOutput`.
+- Sample no-diff: `"status":"diff_missing"` with `noDiffOutput`.
+- Model chip log check: grep `Model chip:` in `tmp/copilot-review-*.log` and ensure it is `GPT-5`; otherwise abort/retry.
+
+Sample JSON (success)
+```json
+{"status":"success","diffOutput":"tmp/copilot-review.patch","retryCount":0}
+```
+Sample JSON (no diff)
+```json
+{"status":"diff_missing","noDiffOutput":"tmp/copilot-review-no-diff.txt","retryCount":1}
+```
+- Sample success: `tmp/copilot-review.json` has `"status":"success"` and a `diffOutput` path.
+- Sample no-diff: `"status":"diff_missing"` with `noDiffOutput` path.
+
+## Integrate downstream
+See `INTEGRATION-PYTHON.md` for the JSON contract used by agents.

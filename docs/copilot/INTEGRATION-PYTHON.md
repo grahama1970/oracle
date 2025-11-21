@@ -4,7 +4,7 @@ Oracle’s browser engine can drive Copilot / ChatGPT to produce a unified diff,
 
 This document outlines the JSON contract and a minimal integration pattern.
 
-## Example JSON result
+## Example JSON results
 
 ```json
 {
@@ -29,6 +29,25 @@ This document outlines the JSON contract and a minimal integration pattern.
     "snapshot-001.html"
   ]
 }
+```
+
+Other statuses (examples)
+
+- `diff_missing`:
+```json
+{"status":"diff_missing","retryCount":1,"noDiffOutput":"tmp/copilot-review-no-diff.txt"}
+```
+- `timeout`:
+```json
+{"status":"timeout","retryCount":1,"elapsedMs":180000,"noDiffOutput":"tmp/copilot-review-no-diff.txt"}
+```
+- `error`:
+```json
+{"status":"error","errorMessage":"model chip mismatch","retryCount":0}
+```
+- `secret_detected`:
+```json
+{"status":"secret_detected","retryCount":0,"promptSanitized":true}
 ```
 
 Key fields:
@@ -60,6 +79,7 @@ From Python, you typically:
 
 ```python
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -90,6 +110,8 @@ def run_oracle_diff(slug: str, prompt_path: pathlib.Path, artifacts_dir: pathlib
     "1",
     "--apply-mode",
     "none",
+    "--timeout-ms",
+    "180000",
   ]
 
   env = dict(**os.environ)
@@ -138,4 +160,3 @@ if __name__ == "__main__":
 6. **Archive artifacts** — store `prompt.md`, `diff.patch`, `result.json`, `output.log`, and any DOM snapshots for auditing.
 
 This keeps Oracle’s responsibilities focused on **prompt assembly, browser automation, and diff handling**, while your Python agent remains in charge of orchestration, policy, and test execution.
-

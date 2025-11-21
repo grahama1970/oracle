@@ -1,0 +1,65 @@
+name: Copilot Smoke (browser)
+
+on:
+  workflow_dispatch:
+  # Optional daily run if secrets are present; comment out if not desired
+  # schedule:
+  #   - cron: "0 12 * * *"
+
+jobs:
+  smoke:
+    if: ${{ secrets.COPILOT_PROFILE_TGZ != '' }}
+    runs-on: ubuntu-latest
+    env:
+      DISPLAY: :99
+      CHROME_PATH: /usr/bin/google-chrome
+      ORACLE_NO_DETACH: 1
+      # Change if your template path differs
+      COPILOT_TEMPLATE: docs/copilot/templates/COPILOT_REVIEW_REQUEST_EXAMPLE.md
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: true
+
+      - name: Start Xvfb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          Xvfb :99 -screen 0 1920x1080x24 >/tmp/xvfb.log 2>&1 &
+
+      - name: Restore authenticated Copilot profile
+        run: |
+          mkdir -p "$HOME/.oracle"
+          echo "${{ secrets.COPILOT_PROFILE_TGZ }}" | base64 -d | tar -xz -C "$HOME/.oracle"
+          ls -la "$HOME/.oracle"
+
+      - name: Quick auth validation
+        run: |
+          xvfb-run -a pnpm tsx tmp/validate-auth-enhanced.ts --quick --headless
+
+      - name: Run Copilot review smoke
+        run: |
+          xvfb-run -a pnpm tsx scripts/copilot-code-review.ts \
+            "$COPILOT_TEMPLATE" \
+            --apply-mode none --model gpt-5 --max-turns 1 --timeout-ms 180000
+        continue-on-error: true
+
+      - name: Upload smoke artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: copilot-smoke-artifacts
+          path: |
+            tmp/*copilot-review-*
+            tmp/validate-auth-*.log
+            tmp/*.json
+          if-no-files-found: ignore
