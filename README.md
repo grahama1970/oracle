@@ -60,6 +60,21 @@ pnpm tsx scripts/use-authenticated-copilot.ts auth
 
 The browser engine and Copilot POC scripts will then reuse that authenticated profile when targeting `https://github.com/copilot/`.
 
+### Copilot quickstart (browser)
+
+- One-pager: `docs/copilot/QUICKSTART.md` (includes copy/paste commands).
+- Prompt template: `docs/copilot/templates/COPILOT_REVIEW_REQUEST_EXAMPLE.md`.
+- Run the template via Oracle (browser engine, single turn):
+  ```bash
+  ORACLE_NO_DETACH=1 xvfb-run -a pnpm tsx scripts/copilot-code-review.ts \
+    docs/copilot/templates/COPILOT_REVIEW_REQUEST_EXAMPLE.md \
+    --apply-mode none --model gpt-5
+  ```
+- Bash helper wrapper (uses the same template by default):
+  ```bash
+  bash docs/copilot/tests/use-copilot.sh
+  ```
+
 ## Quick start
 
 ```bash

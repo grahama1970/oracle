@@ -125,6 +125,7 @@ docs/copilot/
 ├── LEGACY.md              ← Legacy inventory
 ├── templates/             ← Prompt templates (review request, etc.)
 ├── tests/                 ← Copilot browser tests/scripts (lean set)
+├── deprecated/            ← Deprecated summaries (PROGRESS_SUMMARY, SOLUTION_README)
 ├── legacy/                ← Historical docs
 │   ├── troubleshooting/
 │   └── ...
