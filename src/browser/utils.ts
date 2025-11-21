@@ -145,6 +145,8 @@ export async function writeJsonOutput(filePath: string, payload: unknown): Promi
   } catch (error: any) {
     // In constrained test environments (e.g., /repo read-only), fall back to a
     // workspace-relative path to avoid EACCES while still emitting diagnostics.
+    // Fallback intentionally reuses the caller's relative structure under process.cwd()
+    // (no dedicated tmp/ path) and remains silent to avoid noisy test output.
     const isAccessError = error?.code === 'EACCES' || error?.code === 'EPERM';
     const inRootishPath = filePath.startsWith('/');
     if (!isAccessError || !inRootishPath) {
