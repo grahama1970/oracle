@@ -16,6 +16,7 @@ import {
   COPILOT_ASSISTANT_CONTAINER_SELECTOR,
   STOP_BUTTON_SELECTOR,
   SEND_BUTTON_SELECTOR,
+  MODEL_BUTTON_SELECTOR,
 } from '../constants.js';
 
 const COPILOT_CHAT_URL = 'https://github.com/copilot?tab=chat';
@@ -300,6 +301,46 @@ export async function waitForCopilotReady(
 
   logger('Copilot still busy - waiting...');
   return false;
+}
+
+/**
+ * Read the currently selected Copilot model label from the UI.
+ * Returns null when the chip/button cannot be found.
+ */
+export async function readCopilotModelLabel(
+  Runtime: ChromeClient['Runtime'],
+  logger: BrowserLogger,
+): Promise<string | null> {
+  try {
+    const { result } = await Runtime.evaluate({
+      expression: `(() => {
+        const selectors = [
+          '${MODEL_BUTTON_SELECTOR}',
+          '[data-testid*="model-switcher"]',
+          'button[aria-label*="Model"]',
+          'button:has(svg.octicon-sparkle)',
+        ];
+        for (const sel of selectors) {
+          const btn = document.querySelector(sel);
+          if (btn && btn.textContent) {
+            return btn.textContent.trim();
+          }
+        }
+        return null;
+      })()`,
+      returnByValue: true,
+    });
+    const value = typeof result.value === 'string' ? result.value.trim() : null;
+    if (value) {
+      logger(`Copilot model chip reports: ${value}`);
+    } else {
+      logger('Copilot model chip not found');
+    }
+    return value;
+  } catch (error) {
+    logger(`Failed to read Copilot model label: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
 }
 
 /**

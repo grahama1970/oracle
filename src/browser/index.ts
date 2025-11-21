@@ -22,6 +22,7 @@ import {
   checkCopilotAuthentication,
   ensureCopilotPromptReady,
   waitForCopilotResponse,
+  readCopilotModelLabel,
 } from './pageActions.js';
 import { estimateTokenCount, withRetries } from './utils.js';
 import { formatElapsed } from '../oracle/format.js';
@@ -174,6 +175,16 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
         ).catch(() => {
           logger('Copilot model selection failed, continuing with current model');
         });
+
+        // Verify the model chip matches the desired label; fail fast if not.
+        const chip = await readCopilotModelLabel(Runtime, logger);
+        const norm = (input: string | null) => (input ?? '').toLowerCase().replace(/\s+/g, '');
+        if (config.desiredModel && chip && norm(chip) !== norm(config.desiredModel as string)) {
+          throw new Error(
+            `Copilot model mismatch: desired="${config.desiredModel}" chip="${chip}". ` +
+              'Please ensure the GPT-5 picker is selected.',
+          );
+        }
       } else {
         logger('No desiredModel specified for Copilot, using current selection');
       }
