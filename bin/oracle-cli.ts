@@ -194,6 +194,8 @@ program
   .addOption(new Option('--browser-headless', 'Launch Chrome in headless mode.').hideHelp())
   .addOption(new Option('--browser-hide-window', 'Hide the Chrome window after launch (macOS headful only).').hideHelp())
   .addOption(new Option('--browser-keep-browser', 'Keep Chrome running after completion.').hideHelp())
+  .addOption(new Option('--browser-remote-debug-url <url>', 'Connect to an existing Chrome with remote debugging enabled.').hideHelp())
+  .addOption(new Option('--browser-remote-debug-port <port>', 'Remote debugging port (defaults to 9222 if url omitted).').hideHelp())
   .addOption(
     new Option('--browser-allow-cookie-errors', 'Continue even if Chrome cookies cannot be copied.').hideHelp(),
   )

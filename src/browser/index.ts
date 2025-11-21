@@ -55,15 +55,23 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
     );
   }
 
-  const userDataDir = await mkdtemp(path.join(os.tmpdir(), 'oracle-browser-'));
-  logger(`Created temporary Chrome profile at ${userDataDir}`);
-
-  const chrome = await launchChrome(config, userDataDir, logger);
+  const useRemoteChrome = Boolean(config.remoteDebugUrl || config.remoteDebugPort);
+  let userDataDir: string | null = null;
+  let chrome: Awaited<ReturnType<typeof launchChrome>> | null = null;
   let removeTerminationHooks: (() => void) | null = null;
-  try {
-    removeTerminationHooks = registerTerminationHooks(chrome, userDataDir, config.keepBrowser, logger);
-  } catch {
-    // ignore failure; cleanup still happens below
+
+  if (!useRemoteChrome) {
+    userDataDir = await mkdtemp(path.join(os.tmpdir(), 'oracle-browser-'));
+    logger(`Created temporary Chrome profile at ${userDataDir}`);
+    chrome = await launchChrome(config, userDataDir, logger);
+    try {
+      removeTerminationHooks = registerTerminationHooks(chrome, userDataDir, config.keepBrowser, logger);
+    } catch {
+      // ignore failure; cleanup still happens below
+    }
+  } else {
+    const remoteLabel = config.remoteDebugUrl ?? `port ${config.remoteDebugPort ?? 9222}`;
+    logger(`Using existing Chrome via remote debugging (${remoteLabel})`);
   }
 
   let client: Awaited<ReturnType<typeof connectToChrome>> | null = null;
@@ -78,7 +86,12 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
   const snapshotPaths: string[] = [];
 
   try {
-    client = await connectToChrome(chrome.port, logger);
+    const connectionTarget = chrome
+      ? { port: chrome.port }
+      : config.remoteDebugUrl
+        ? { browserURL: config.remoteDebugUrl }
+        : { port: config.remoteDebugPort ?? 9222 };
+    client = await connectToChrome(connectionTarget, logger);
     const markConnectionLost = () => {
       connectionClosedUnexpectedly = true;
     };
@@ -94,23 +107,28 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
       domainEnablers.push(DOM.enable());
     }
     await Promise.all(domainEnablers);
-    await Network.clearBrowserCookies();
 
-    if (config.cookieSync) {
-      const cookieCount = await syncCookies(
-        Network,
-        config.url,
-        config.chromeProfile,
-        logger,
-        config.allowCookieErrors ?? false,
-      );
-      logger(
-        cookieCount > 0
-          ? `Copied ${cookieCount} cookies from Chrome profile ${config.chromeProfile ?? 'Default'}`
-          : 'No Chrome cookies found; continuing without session reuse',
-      );
+    if (!useRemoteChrome) {
+      await Network.clearBrowserCookies();
+
+      if (config.cookieSync) {
+        const cookieCount = await syncCookies(
+          Network,
+          config.url,
+          config.chromeProfile,
+          logger,
+          config.allowCookieErrors ?? false,
+        );
+        logger(
+          cookieCount > 0
+            ? `Copied ${cookieCount} cookies from Chrome profile ${config.chromeProfile ?? 'Default'}`
+            : 'No Chrome cookies found; continuing without session reuse',
+        );
+      } else {
+        logger('Skipping Chrome cookie sync (--browser-no-cookie-sync)');
+      }
     } else {
-      logger('Skipping Chrome cookie sync (--browser-no-cookie-sync)');
+      logger('Remote debugging session detected; skipping cookie clearing/sync and using existing profile.');
     }
 
     // Detect target platform
@@ -292,21 +310,23 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
       // ignore
     }
     removeTerminationHooks?.();
-    if (!config.keepBrowser) {
-      if (!connectionClosedUnexpectedly) {
-        try {
-          await chrome.kill();
-        } catch {
-          // ignore kill failures
+    if (chrome && userDataDir) {
+      if (!config.keepBrowser) {
+        if (!connectionClosedUnexpectedly) {
+          try {
+            await chrome.kill();
+          } catch {
+            // ignore kill failures
+          }
         }
+        await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined);
+        if (!connectionClosedUnexpectedly) {
+          const totalSeconds = (Date.now() - startedAt) / 1000;
+          logger(`Cleanup ${runStatus} • ${totalSeconds.toFixed(1)}s total`);
+        }
+      } else if (!connectionClosedUnexpectedly) {
+        logger(`Chrome left running on port ${chrome.port} with profile ${userDataDir}`);
       }
-      await rm(userDataDir, { recursive: true, force: true }).catch(() => undefined);
-      if (!connectionClosedUnexpectedly) {
-        const totalSeconds = (Date.now() - startedAt) / 1000;
-        logger(`Cleanup ${runStatus} • ${totalSeconds.toFixed(1)}s total`);
-      }
-    } else if (!connectionClosedUnexpectedly) {
-      logger(`Chrome left running on port ${chrome.port} with profile ${userDataDir}`);
     }
   }
 }

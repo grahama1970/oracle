@@ -45,6 +45,8 @@ export interface BrowserAutomationConfig {
   headless?: boolean;
   keepBrowser?: boolean;
   hideWindow?: boolean;
+  remoteDebugUrl?: string | null;
+  remoteDebugPort?: number | null;
   desiredModel?: string | null;
   debug?: boolean;
   allowCookieErrors?: boolean;

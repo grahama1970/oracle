@@ -16,7 +16,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { runBrowserMode, type BrowserAutomationConfig } from '../src/browserMode.js';
-import { extractUnifiedDiff, isValidUnifiedDiff } from '../src/browser/diffExtractor.js';
+import { parseLenientDiff, reconstructUnifiedDiff } from '../src/browser/lenientDiffParser.js';
 import { applyPatch, validatePatch, ensureGitRoot } from '../src/browser/gitIntegration.js';
 
 function normalizeAssistantOutput(answer: string): string {
@@ -121,6 +121,10 @@ async function main() {
 
   const chromeProfile = process.env.CHROME_PROFILE_DIR || `${process.env.HOME}/.oracle/chrome-profile`;
   const chromePath = process.env.CHROME_PATH || '/usr/bin/google-chrome';
+  const remoteDebugUrl = process.env.CHROME_REMOTE_DEBUG_URL || undefined;
+  const remoteDebugPort = process.env.CHROME_REMOTE_DEBUG_PORT
+    ? Number(process.env.CHROME_REMOTE_DEBUG_PORT)
+    : undefined;
   const desiredModel = resolveDesiredModelLabel(modelArg);
 
   const config: BrowserAutomationConfig = {
@@ -129,11 +133,13 @@ async function main() {
     url: 'https://github.com/copilot/',
     timeoutMs: 900_000,
     inputTimeoutMs: 30_000,
-    cookieSync: true,
+    cookieSync: remoteDebugUrl || remoteDebugPort ? false : true,
     // Headful debug mode for Copilot POC so we can inspect the DOM.
     headless: false,
     keepBrowser: true,
     hideWindow: false,
+    remoteDebugUrl,
+    remoteDebugPort,
     // Target the GPT-5/GPT-5 Pro picker labels for browser runs.
     desiredModel,
     debug: true,
@@ -188,27 +194,21 @@ async function main() {
       let patchPath: string | undefined;
       hasDiff = false;
       try {
-        const extraction = extractUnifiedDiff(answer);
-        patch = extraction.selectedBlock;
+        const parsedFiles = parseLenientDiff(answer);
 
-        if (!patch) {
+        if (parsedFiles.length === 0) {
           const noDiffPath = path.join(tmpDir, `${slug}-copilot-review-no-diff.txt`);
           await writeAnswerArtifacts(noDiffPath, answer, rawAnswer);
-          console.log(`[oracle] No diff found; wrote ${noDiffPath}`);
+          console.log(`[oracle] No parseable diff hunks found; wrote ${noDiffPath}`);
           break;
         }
 
-        const isUnifiedDiff = isValidUnifiedDiff(patch, true);
-        if (!isUnifiedDiff) {
-          const invalidPath = path.join(tmpDir, `${slug}-copilot-review-invalid-diff.txt`);
-          await writeAnswerArtifacts(invalidPath, answer, rawAnswer);
-          console.log(`[oracle] Diff failed strict validation; wrote ${invalidPath}`);
-          break;
-        }
-
+        patch = reconstructUnifiedDiff(parsedFiles);
         patchPath = path.join(tmpDir, `${slug}-copilot-review-turn-${turn}.patch`);
         await writeFile(patchPath, patch, 'utf8');
-        console.log(`\n[oracle] Extracted unified diff for round ${turn} -> ${patchPath}`);
+        console.log(
+          `\n[oracle] Extracted patch for round ${turn} (${parsedFiles.length} file(s)) -> ${patchPath}`,
+        );
         lastDiff = patch;
         hasDiff = true;
 

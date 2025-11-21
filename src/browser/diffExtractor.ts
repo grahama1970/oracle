@@ -30,14 +30,25 @@ export function extractUnifiedDiff(markdown: string): DiffExtractionResult {
       return {
         rawBlocks: [normalizedFromBeginPatch],
         selectedBlock: normalizedFromBeginPatch,
-        score: 5,
+        score: 6,
         reason: 'normalized_begin_patch',
       };
     }
     return { rawBlocks: [], reason: hasPartialFence ? 'partial_fence' : 'no_fenced_blocks' };
   }
   const scored = fenced
-    .map((block) => {
+    .map((rawBlock) => {
+      // Attempt to normalize patch-marker style blocks inside fenced code that
+      // lack diff headers (e.g., a fenced ```patch block containing *** Begin Patch).
+      let block = rawBlock;
+      let normalizedApplied = false;
+      if ((!DIFF_HEADER_RE.test(block) || !HUNK_RE.test(block)) && /\*\*\*\s*Begin Patch/.test(block)) {
+        const normalized = normalizeBeginPatch(block);
+        if (normalized) {
+          block = normalized;
+          normalizedApplied = true;
+        }
+      }
       let score = 0;
       if (DIFF_HEADER_RE.test(block)) score += 5;
       if (HUNK_RE.test(block)) score += 3;
@@ -45,6 +56,9 @@ export function extractUnifiedDiff(markdown: string): DiffExtractionResult {
       if (block.length > 200) score += 1;
       if (/\*\*\*\s*Begin Patch/.test(block) || /\*\*\*\s*Update File:/.test(block)) {
         score += 1;
+      }
+      if (normalizedApplied) {
+        score += 2; // Reward successful normalization.
       }
       return { block, score };
     })
@@ -60,12 +74,23 @@ export function extractUnifiedDiff(markdown: string): DiffExtractionResult {
     if (normalized && DIFF_HEADER_RE.test(normalized) && HUNK_RE.test(normalized)) {
       best = { block: normalized, score: (best.score ?? 0) + 3 };
     }
+    // Secondary global normalization attempt when fenced blocks exist but top block failed.
+    if ((!DIFF_HEADER_RE.test(best.block) || !HUNK_RE.test(best.block)) && /\*\*\*\s*Begin Patch/.test(markdown)) {
+      const globalNormalized = normalizeBeginPatch(markdown);
+      if (globalNormalized && DIFF_HEADER_RE.test(globalNormalized) && HUNK_RE.test(globalNormalized)) {
+        best = { block: globalNormalized, score: (best.score ?? 0) + 4 };
+      }
+    }
   }
 
   return {
     rawBlocks: scored.map((entry) => entry.block),
     selectedBlock: best.block,
     score: best.score,
+    reason:
+      DIFF_HEADER_RE.test(best.block) && HUNK_RE.test(best.block)
+        ? undefined
+        : 'no_valid_unified_diff',
   };
 }
 

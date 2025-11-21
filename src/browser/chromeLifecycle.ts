@@ -83,8 +83,25 @@ export async function hideChromeWindow(chrome: LaunchedChrome, logger: BrowserLo
   }
 }
 
-export async function connectToChrome(port: number, logger: BrowserLogger): Promise<ChromeClient> {
-  const client = await CDP({ port });
+type ChromeConnectionTarget =
+  | number
+  | {
+      port?: number | null;
+      browserURL?: string | null;
+    };
+
+export async function connectToChrome(target: ChromeConnectionTarget, logger: BrowserLogger): Promise<ChromeClient> {
+  let connection: { port: number; host?: string };
+  if (typeof target === 'number') {
+    connection = { port: target };
+  } else if (target.browserURL) {
+    const parsed = new URL(target.browserURL);
+    const port = parsed.port ? Number(parsed.port) : parsed.protocol === 'https:' ? 443 : 80;
+    connection = { port, host: parsed.hostname };
+  } else {
+    connection = { port: target.port ?? 9222 };
+  }
+  const client = await CDP(connection);
   logger('Connected to Chrome DevTools protocol');
   return client;
 }

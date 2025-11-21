@@ -3,17 +3,17 @@ Patch
 DiffWrapCopy code*** Begin Patch
 *** Update File: src/browser/actions/copilotNavigation.ts
 @@
--      // If UI shows "done" and we have any markdown, exit immediately to avoid hangs.
--      logger('Copilot response complete ✓ (UI done / markdown present)');
--      return { text: confirmText || text, html };
-+      // If UI shows "done" and we have any markdown, exit immediately to avoid hangs.
-+      logger('Copilot snapshot stabilized');
-+      logger('Copilot response complete ✓ (UI done / markdown present)');
-+      return { text: confirmText || text, html };
+ 
+        // If UI shows "done" and we have non-empty markdown, exit immediately.
+        if (chars >= minCharsForEarlyExit) {
++         logger('Copilot snapshot stabilized');
+          logger('Copilot response complete ✓ (UI done immediate)');
+          return { text: confirmText, html };
+        }
+ 
+        // UI reports done + non-empty markdown: bail out immediately to avoid hangs.
 *** End Patch
 
 Notes
 
-- Exactly one new log line was added: logger('Copilot snapshot stabilized').
-
-- No functional logic was changed; the new line is a concise debug message placed at the code path where the response is declared complete (UI done + markdown present).
+- Added exactly one concise log line using the existing logger in the “UI done immediate” completion path. No functional changes made.

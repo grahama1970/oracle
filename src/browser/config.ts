@@ -11,6 +11,8 @@ export const DEFAULT_BROWSER_CONFIG: ResolvedBrowserConfig = {
   headless: false,
   keepBrowser: false,
   hideWindow: false,
+  remoteDebugUrl: null,
+  remoteDebugPort: null,
   desiredModel: DEFAULT_MODEL_TARGET,
   debug: false,
   allowCookieErrors: false,
@@ -27,6 +29,8 @@ export function resolveBrowserConfig(config: BrowserAutomationConfig | undefined
     headless: config?.headless ?? DEFAULT_BROWSER_CONFIG.headless,
     keepBrowser: config?.keepBrowser ?? DEFAULT_BROWSER_CONFIG.keepBrowser,
     hideWindow: config?.hideWindow ?? DEFAULT_BROWSER_CONFIG.hideWindow,
+    remoteDebugUrl: config?.remoteDebugUrl ?? DEFAULT_BROWSER_CONFIG.remoteDebugUrl,
+    remoteDebugPort: config?.remoteDebugPort ?? DEFAULT_BROWSER_CONFIG.remoteDebugPort,
     // If desiredModel is explicitly present and null, respect that as "no model selection"
     desiredModel:
       config && Object.prototype.hasOwnProperty.call(config, 'desiredModel')

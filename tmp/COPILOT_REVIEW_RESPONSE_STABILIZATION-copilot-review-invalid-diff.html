@@ -1,0 +1,259 @@
+Patch
+Diff
+Fix Copilot stabilization and diff normalization
+diff --git a/scripts/copilot-code-review.ts b/scripts/copilot-code-review.ts
+index 50bdd2b..9c2a1d1 100755
+--- a/scripts/copilot-code-review.ts
++++ b/scripts/copilot-code-review.ts
+@@
+ 16| import { mkdir, readFile, writeFile } from 'node:fs/promises';
+ 17| import path from 'node:path';
+ 18| import { runBrowserMode, type BrowserAutomationConfig } from '../src/browserMode.js';
+ 19| import { extractUnifiedDiff, isValidUnifiedDiff } from '../src/browser/diffExtractor.js';
+ 20| import { applyPatch, validatePatch, ensureGitRoot } from '../src/browser/gitIntegration.js';
++21| import { normalizePatchLikeBlocks } from '../src/browser/diffNormalizer.js';
+@@
+ 187|       let patch: string | undefined;
+ 188|       let patchPath: string | undefined;
+ 189|       hasDiff = false;
+ 190|       try {
+-191|         const extraction = extractUnifiedDiff(answer);
+-192|         patch = extraction.selectedBlock;
+-
+-193|         if (!patch) {
+-194|           const noDiffPath = path.join(tmpDir, `${slug}-copilot-review-no-diff.txt`);
+-195|           await writeAnswerArtifacts(noDiffPath, answer, rawAnswer);
+-196|           console.log(`[oracle] No diff found; wrote ${noDiffPath}`);
+-197|           break;
+-198|         }
++191|         const extraction = extractUnifiedDiff(answer);
++192|         patch = extraction.selectedBlock;
++193| 
++194|         // Fallback normalization: accept Copilot patch-like blocks (*** Begin Patch / ```patch)
++195|         if (!patch) {
++196|           const normalized = normalizePatchLikeBlocks(answer);
++197|           if (normalized && isValidUnifiedDiff(normalized, false)) {
++198|             console.log('[oracle] Fallback diff normalization succeeded (patch-like block transformed).');
++199|             patch = normalized;
++200|           }
++201|         }
++202| 
++203|         if (!patch) {
++204|           const noDiffPath = path.join(tmpDir, `${slug}-copilot-review-no-diff.txt`);
++205|           await writeAnswerArtifacts(noDiffPath, answer, rawAnswer);
++206|           console.log(`[oracle] No diff found; wrote ${noDiffPath}`);
++207|           break;
++208|         }
+@@
+ 202|         if (!isUnifiedDiff) {
+-203|           const invalidPath = path.join(tmpDir, `${slug}-copilot-review-invalid-diff.txt`);
+-204|           await writeAnswerArtifacts(invalidPath, answer, rawAnswer);
+-205|           console.log(`[oracle] Diff failed strict validation; wrote ${invalidPath}`);
+-206|           break;
++203|           // Attempt second-stage normalization if initial unified validation fails.
++204|           const retryNormalized = normalizePatchLikeBlocks(answer);
++205|           if (retryNormalized && isValidUnifiedDiff(retryNormalized, false)) {
++206|             console.log('[oracle] Second-stage normalization produced a valid unified diff.');
++207|             patch = retryNormalized;
++208|           } else {
++209|             const invalidPath = path.join(tmpDir, `${slug}-copilot-review-invalid-diff.txt`);
++210|             await writeAnswerArtifacts(invalidPath, answer, rawAnswer);
++211|             console.log(`[oracle] Diff failed strict validation; wrote ${invalidPath}`);
++212|             break;
++213|           }
+         }
+@@
+ 234|       } catch (err) {
+ 235|         const invalidPath = path.join(tmpDir, `${slug}-copilot-review-invalid-diff.txt`);
+ 236|         await writeAnswerArtifacts(invalidPath, answer, rawAnswer);
+ 237|         const msg = err instanceof Error ? err.message : String(err);
+-238|         console.log(`[oracle] Failed to extract a valid diff: ${msg}; wrote ${invalidPath}`);
++238|         console.log(`[oracle] Failed to extract a valid diff (pre-normalization fallback): ${msg}; wrote ${invalidPath}`);
+ 239|         break;
+ 240|       }
+diff --git a/src/browser/diffNormalizer.ts b/src/browser/diffNormalizer.ts
+new file mode 100644
+index 0000000..6dd3aa2
+--- /dev/null
++++ b/src/browser/diffNormalizer.ts
+@@
++/**
++ * Normalize Copilot / LLM patch-like output formats into a canonical unified diff.
++ *
++ * Supported inputs:
++ * - Fenced ```diff / ```patch blocks that may omit headers.
++ * - *** Begin Patch / *** Update File: path style multi-file blocks.
++ *
++ * Strategy:
++ * 1. Locate an existing unified diff (short-circuit if found).
++ * 2. Extract fenced patch/diff blocks; synthesize headers if missing.
++ * 3. Parse *** Begin Patch sections and convert each "*** Update File: <path>" block
++ *    into a synthetic diff with one hunk.
++ *
++ * Constraints / Safety:
++ * - Reject absolute paths or traversal (/, \\ at start, ../ segments).
++ * - Only emit paths under repository root (relative paths).
++ * - Provide minimal hunk line numbers (we do not reconstruct actual originals).
++ */
++
++const UNIFIED_HEADER_RE = /^diff --git a\//m;
++
++function isSafeRelativePath(p: string): boolean {
++  return !!p &&
++    !p.startsWith('/') &&
++    !p.startsWith('\\') &&
++    !p.includes('..') &&
++    !p.includes('\r') &&
++    !p.includes('\n');
++}
++
++function buildSyntheticHunk(lines: string[]): { hunk: string; added: number; removed: number } {
++  const added = lines.filter(l => l.startsWith('+')).length;
++  const removed = lines.filter(l => l.startsWith('-')).length;
++  const context = lines.filter(l => !l.startsWith('+') && !l.startsWith('-')).length;
++  // Provide conservative line counts: treat all as new if any additions.
++  const newTotal = Math.max(1, added + context);
++  const oldTotal = Math.max(0, removed + context);
++  const header = `@@ -0,${oldTotal} +1,${newTotal} @@`;
++  return {
++    hunk: [header, ...lines].join('\n'),
++    added,
++    removed,
++  };
++}
++
++function synthesizeUnifiedDiffForFile(path: string, body: string): string | null {
++  if (!isSafeRelativePath(path)) return null;
++  const rawLines = body
++    .split('\n')
++    .map(l => l.replace(/\r$/, ''))
++    .filter(l => l.length > 0);
++
++  // If lines lack +/- markers, assume all additions.
++  const normalized = rawLines.map(l => {
++    if (/^[\+\-]/.test(l)) return l;
++    return `+${l}`;
++  });
++
++  const { hunk } = buildSyntheticHunk(normalized);
++  return [
++    `diff --git a/${path} b/${path}`,
++    `--- a/${path}`,
++    `+++ b/${path}`,
++    hunk,
++    '',
++  ].join('\n');
++}
++
++function extractFenceBlocks(answer: string): string[] {
++  const blocks: string[] = [];
++  const re = /```(?:diff|patch)([\s\S]*?)```/gi;
++  let m;
++  while ((m = re.exec(answer)) !== null) {
++    const content = (m[1] || '').trim();
++    if (content) blocks.push(content);
++  }
++  return blocks;
++}
++
++function normalizeFenceBlock(block: string): string | null {
++  if (UNIFIED_HEADER_RE.test(block)) {
++    // Already unified diff-ish.
++    return block;
++  }
++  // Attempt to detect single-file additive patch without headers.
++  // Heuristic: first non-empty line not starting with +/- appears to be a path line like "src/file.ts".
++  const lines = block.split('\n').map(l => l.trimEnd()).filter(l => l.length > 0);
++  if (!lines.length) return null;
++  const candidatePath = lines[0];
++  if (isSafeRelativePath(candidatePath) && !candidatePath.startsWith('@@')) {
++    const bodyLines = lines.slice(1);
++    return synthesizeUnifiedDiffForFile(candidatePath, bodyLines.join('\n'));
++  }
++  return null;
++}
++
++function extractStarPatch(answer: string): string | null {
++  const m = /\*\*\*\s*Begin Patch([\s\S]*?)\*\*\*\s*End Patch/gi.exec(answer);
++  if (!m) return null;
++  const body = m[1] || '';
++  const fileBlocks = body.split(/\*\*\*\s*Update File:/).slice(1); // skip preamble
++  const diffs: string[] = [];
++  for (const fb of fileBlocks) {
++    const trimmed = fb.trim();
++    const firstLineEnd = trimmed.indexOf('\n');
++    const path = (firstLineEnd === -1 ? trimmed : trimmed.slice(0, firstLineEnd)).trim();
++    const content = firstLineEnd === -1 ? '' : trimmed.slice(firstLineEnd + 1);
++    const diff = synthesizeUnifiedDiffForFile(path, content);
++    if (diff) diffs.push(diff);
++  }
++  if (!diffs.length) return null;
++  return diffs.join('\n');
++}
++
++export function normalizePatchLikeBlocks(answer: string): string | undefined {
++  if (!answer || typeof answer !== 'string') return undefined;
++  // 1) If unified diff already present, return undefined (caller already has it).
++  if (UNIFIED_HEADER_RE.test(answer)) return undefined;
++
++  // 2) Try fenced blocks.
++  const fenceBlocks = extractFenceBlocks(answer);
++  for (const b of fenceBlocks) {
++    const unified = normalizeFenceBlock(b);
++    if (unified) return unified.trim();
++  }
++
++  // 3) Try *** Begin Patch format.
++  const starPatch = extractStarPatch(answer);
++  if (starPatch) return starPatch.trim();
++
++  return undefined;
++}
+diff --git a/src/browser/actions/copilotNavigation.ts b/src/browser/actions/copilotNavigation.ts
+index ec6682e..c8c6cb1 100644
+--- a/src/browser/actions/copilotNavigation.ts
++++ b/src/browser/actions/copilotNavigation.ts
+@@
+ 272| export async function waitForCopilotResponse(
+ 273|   Runtime: ChromeClient['Runtime'],
+ 274|   timeoutMs: number,
+ 275|   logger: BrowserLogger
+ 276| ): Promise<{ text: string; html: string | null }> {
+@@
+ 283|   const pollIntervalMs = 400;
+ 284|   const requiredStableCycles = 2;
+ 285|   const softCompleteAfterMs = 45_000;
+ 286|   const fallbackAfterMs = 30_000;
+ 287|   const minCharsForLongAnswer = 800;
+ 288|   const longAnswerStableCycles = 1;
+ 289|   const earlyUiDoneFallbackMs = 8_000;
+ 290|   const minCharsForEarlyExit = 400;
++291|   const hardAbortSafetyMs = Math.min(timeoutMs - 5_000, 120_000); // never wait past this for stability
+@@
+ 435|   let firstLongAnswerAt: number | null = null;
+@@
+ 547|     // NEW EARLY EXIT: Send icon shown with non-empty markdown - return immediately
+ 548|     if (sendIconVisible && text.length > 0) {
+ 549|       logger(
+ 550|         `[immediate-exit] Send icon shown with ${text.length} chars (loadingAttr=${loadingAttr ?? 'null'}) - returning`,
+ 551|       );
+ 552|       return { text: text, html: html };
+ 553|     }
++554| 
++555|     // Safety valve: if we have substantial content and no typing indicators for > hardAbortSafetyMs.
++556|     if (elapsed > hardAbortSafetyMs && chars > 200) {
++557|       logger('Copilot snapshot stabilized (hard safety valve)');
++558|       logger('Copilot response complete ✓ (hard safety valve)');
++559|       return { text: confirmText || text, html };
++560|     }
+@@
+ 631| 
+ 632|   logger('Copilot response timeout');
+ 633|   // Fail closed: do not return sidebar chrome as a "response".
+ 634|   return { text: '', html: null };
+ 635| }
+
+Clarifying answers
+Yes, a heuristic fallback after N seconds / snapshots is appropriate. The updated logic includes early exits plus a hard safety valve to avoid hanging when substantial content is already present.
+The diff normalization layer should be d across all browser targets that can emit patch-like blocks, not limited to Copilot. This promotes consistency and reuse.
+Prefer treating partially parsed patches as invalid_diff (and not applying any changes) rather than a partial success state. This maintains atomicity and avoids unintended partial modifications.

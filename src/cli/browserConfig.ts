@@ -7,8 +7,8 @@ const DEFAULT_BROWSER_INPUT_TIMEOUT_MS = 30_000;
 const DEFAULT_CHROME_PROFILE = 'Default';
 
 const BROWSER_MODEL_LABELS: Record<ModelName, string> = {
-  'gpt-5-pro': 'GPT-5 Pro',
-  // ChatGPT’s picker currently labels the `gpt-5.1` family as “GPT-5”.
+  // Copilot currently exposes two entries: “GPT-5” and “GPT-5 mini”.
+  'gpt-5-pro': 'GPT-5',
   'gpt-5.1': 'GPT-5',
 };
 
@@ -22,6 +22,8 @@ export interface BrowserFlagOptions {
   browserHeadless?: boolean;
   browserHideWindow?: boolean;
   browserKeepBrowser?: boolean;
+  browserRemoteDebugUrl?: string;
+  browserRemoteDebugPort?: string;
   browserModelLabel?: string;
   browserAllowCookieErrors?: boolean;
   model: ModelName;
@@ -53,6 +55,12 @@ export function buildBrowserConfig(options: BrowserFlagOptions): BrowserSessionC
   const normalizedOverride = desiredModelOverride?.toLowerCase() ?? '';
   const baseModel = options.model.toLowerCase();
   const shouldUseOverride = normalizedOverride.length > 0 && normalizedOverride !== baseModel;
+  const remoteDebugUrl = options.browserRemoteDebugUrl ?? process.env.CHROME_REMOTE_DEBUG_URL ?? undefined;
+  const remotePortFlag = options.browserRemoteDebugPort
+    ? Number(options.browserRemoteDebugPort)
+    : process.env.CHROME_REMOTE_DEBUG_PORT
+      ? Number(process.env.CHROME_REMOTE_DEBUG_PORT)
+      : undefined;
   return {
     chromeProfile: options.browserChromeProfile ?? DEFAULT_CHROME_PROFILE,
     chromePath: options.browserChromePath ?? null,
@@ -65,6 +73,8 @@ export function buildBrowserConfig(options: BrowserFlagOptions): BrowserSessionC
     headless: options.browserHeadless ? true : undefined,
     keepBrowser: options.browserKeepBrowser ? true : undefined,
     hideWindow: options.browserHideWindow ? true : undefined,
+    remoteDebugUrl,
+    remoteDebugPort: remotePortFlag,
     desiredModel: shouldUseOverride ? desiredModelOverride : mapModelToBrowserLabel(options.model),
     debug: options.verbose ? true : undefined,
     allowCookieErrors: options.browserAllowCookieErrors ? true : undefined,
