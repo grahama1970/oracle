@@ -24,47 +24,40 @@ export const ANSWER_SELECTORS = [
   '[data-message-author-role="assistant"]',
 ];
 
-// Copilot-specific DOM scopes for assistant markdown and responses. Keeping
-// them centralized avoids scattering selector drift fixes across modules.
+// Copilot-specific DOM scopes for assistant markdown and responses.
+// Using stable attributes instead of fragile hashed classes.
 export const COPILOT_MARKDOWN_SELECTORS = [
-  // Exact markdown body for the latest assistant turn (observed 2025-11-17).
-  'div.ChatMessage-module__content--sWQll > div.markdown-body.MarkdownRenderer-module__container--dNKcF.MarkdownViewer-module__markdownOverrides--xtpOl[data-copilot-markdown="true"]',
-  // Slightly looser but still scoped to markdown bodies Copilot renders.
-  'div.markdown-body.MarkdownRenderer-module__container--dNKcF.MarkdownViewer-module__markdownOverrides--xtpOl[data-copilot-markdown="true"]',
-  'div.markdown-body.MarkdownRenderer-module__container--dNKcF[data-copilot-markdown="true"]',
-  'div.markdown-body[data-copilot-markdown="true"]',
-  'div.markdown-body',
+  '[data-copilot-markdown="true"]',
+  '.markdown-body',
+  '[data-testid="copilot-markdown"]',
 ];
 
-// Latest assistant message container in Copilot (use exact class chain to avoid sidebar matches).
+// Latest assistant message container in Copilot.
 export const COPILOT_MESSAGE_SELECTORS = [
-  // Exact hashed class chain (latest assistant turn)
-  'div.message-container.ChatMessage-module__chatMessage--mrG0f.ChatMessage-module__ai--l6YpD.ChatMessage-module__latest--AGxtS',
-  // Fallback: any assistant message (keep hashed classes but drop latest)
-  'div.message-container.ChatMessage-module__chatMessage--mrG0f.ChatMessage-module__ai--l6YpD',
-  // Hash-tolerant match for future rotations
-  'div.message-container[class*="ChatMessage-module__chatMessage"][class*="ChatMessage-module__ai"]',
+  '[data-copilot-message="assistant"]',
+  '[data-testid="assistant-message"]',
+  '[data-message-role="assistant"]',
+  'div[class*="assistant"]',
 ];
 
-// Direct markdown body inside the assistant message container (exact match first, then fall back to COPILOT_MARKDOWN_SELECTORS).
-export const COPILOT_MARKDOWN_BODY_SELECTOR =
-  'div.ChatMessage-module__content--sWQll > div.markdown-body.MarkdownRenderer-module__container--dNKcF.MarkdownViewer-module__markdownOverrides--xtpOl[data-copilot-markdown="true"]';
+// Direct markdown body inside the assistant message container.
+export const COPILOT_MARKDOWN_BODY_SELECTOR = '[data-copilot-markdown="true"]';
 
 // Copilot send/stop button with data-loading flag (used as typing indicator).
 export const COPILOT_LOADING_BUTTON_SELECTOR =
-  'button.prc-Button-ButtonBase-c50BI.prc-Button-IconButton-szpyj[data-component="IconButton"][data-loading], button[data-component="IconButton"][data-loading]';
+  'button[data-loading], [data-testid="send-button"][data-loading="true"]';
 
 // Optional: stop/loading icon inside the send button.
-export const COPILOT_STOP_ICON_SELECTOR = 'svg.octicon-square-fill';
-export const COPILOT_SEND_ICON_SELECTOR = 'svg.octicon-paper-airplane';
+export const COPILOT_STOP_ICON_SELECTOR = 'svg.octicon-square-fill, [data-testid="stop-icon"]';
+export const COPILOT_SEND_ICON_SELECTOR = 'svg.octicon-paper-airplane, [data-testid="send-icon"]';
 
 // Copilot conversation container to scope queries away from the sidebar.
 export const COPILOT_CONVERSATION_SCOPE_SELECTOR =
   [
-    'div.ConversationView-module__container--XaY36 div.ImmersiveChat-module__messageContent--JE3f_',
-    'div.ConversationView-module__container--XaY36 div.ImmersiveChat-module__messageContent',
-    // Fallback: chat thread region used by some Copilot layouts
     '[data-testid="chat-thread"]',
+    'main[role="main"]',
+    '[data-conversation]',
+    '.copilot-conversation-container'
   ].join(', ');
 
 export const COPILOT_RESPONSE_SELECTORS = [
@@ -107,4 +100,4 @@ export const COPILOT_SPINNER_SELECTOR =
  * Container for assistant messages (scoping for extraction)
  */
 export const COPILOT_ASSISTANT_CONTAINER_SELECTOR =
-  '[data-testid="copilot-chat-conversation"], .copilot-conversation-container, .ConversationView-module__container--XaY36';
+  '[data-testid="copilot-chat-conversation"], .copilot-conversation-container, [data-testid="chat-thread"]';

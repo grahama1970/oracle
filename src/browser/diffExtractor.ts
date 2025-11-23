@@ -13,7 +13,7 @@ export interface DiffExtractionResult {
 const FENCE_RE = /```[^\n]*\n([\s\S]*?)```/g;
 const HUNK_RE = /@@ -\d+,\d+ \+\d+,\d+ @@/;
 const DIFF_HEADER_RE = /^diff --git /m;
-const BEGIN_PATCH_RE = /^\*\*\*\s*Begin Patch[\r\n]+([\s\S]*?)^\*\*\*\s*End Patch\s*$/im;
+const BEGIN_PATCH_RE = /^\*\*\*\s*Begin Patch[\r\n]+([\s\S]*)/im;
 const UPDATE_FILE_RE = /^\*\*\*\s*Update File:\s*(.+)$/im;
 
 function stripCarriageReturns(input: string): string {
@@ -237,7 +237,14 @@ function normalizeBeginPatch(markdown: string): string | undefined {
   if (!beginMatch) {
     return undefined;
   }
-  const body = beginMatch[1].trim();
+  let body = beginMatch[1];
+  // Check for End Patch marker and truncate if found
+  const endPatchMatch = body.match(/^\*\*\*\s*End Patch/m);
+  if (endPatchMatch && endPatchMatch.index !== undefined) {
+    body = body.substring(0, endPatchMatch.index);
+  }
+  body = body.trim();
+
   if (!body) {
     return undefined;
   }

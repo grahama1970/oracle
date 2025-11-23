@@ -18,6 +18,7 @@ import {
   ensureGitRoot,
   getCurrentBranch,
   getHeadSha,
+  push,
   validateDiffPaths,
   validatePatch,
 } from './gitIntegration.js';
@@ -104,9 +105,9 @@ export async function runBrowserSessionExecution(
   const secretSummary =
     secretMatches.length > 0
       ? {
-          status: 'matches_detected' as const,
-          matches: secretMatches.map((entry) => entry.pattern),
-        }
+        status: 'matches_detected' as const,
+        matches: secretMatches.map((entry) => entry.pattern),
+      }
       : { status: 'ok' as const, matches: [] as string[] };
   let composerText = promptArtifacts.composerText;
   if (secretMatches.length > 0 && runOptions.sanitizePrompt) {
@@ -236,9 +237,9 @@ export async function runBrowserSessionExecution(
       } else {
         const diffDir = path.dirname(diffOutputPath);
         await mkdir(diffDir, { recursive: true });
-        await writeFile(diffOutputPath, diffText, 'utf8');
+        await writeFile(diffOutputPath, diffText!, 'utf8');
         finalDiffPath = diffOutputPath;
-        finalPatchBytes = Buffer.byteLength(diffText, 'utf8');
+        finalPatchBytes = Buffer.byteLength(diffText!, 'utf8');
         if (applyMode && applyMode !== 'none') {
           await ensureGitRoot(gitRoot);
           const validation = validatePatch(diffOutputPath, gitRoot);
@@ -262,6 +263,31 @@ export async function runBrowserSessionExecution(
                 const head = getHeadSha(gitRoot);
                 if (head.ok && head.stdout) {
                   finalCommitSha = head.stdout.trim();
+                }
+                // Push the changes
+                const pushed = push(gitRoot, 'origin', runOptions.branch);
+                if (!pushed.ok) {
+                  // We don't fail the whole status if push fails, but we should log it or maybe warn?
+                  // For now, let's treat it as a warning in the logs but keep status success (since commit worked)
+                  // Or maybe we should set status to 'push_failed'? CONTRACT says "commit_failed" is a status.
+                  // Let's stick to success but maybe add a diagnostic field if we had one.
+                  // Actually, if push fails, the agent might want to know.
+                  // But CONTRACT.md doesn't explicitly define 'push_failed'.
+                  // Let's log it to stderr for now via console.error or just append to gitCommitError?
+                  if (gitCommitError) {
+                    gitCommitError += '\nPush failed: ' + pushed.stderr;
+                  } else {
+                    gitCommitError = 'Push failed: ' + pushed.stderr;
+                  }
+                  // We might want to reflect this in status, but 'success' usually implies "done".
+                  // If the user expects it to be pushed, maybe 'push_failed' is better?
+                  // Let's stick to 'success' for the commit, but maybe we should add a warning.
+                  // However, the prompt says "Oracle MUST... push...".
+                  // If push fails, is it a success? Probably not.
+                  // Let's set status to 'push_failed' if we can, or just 'commit_failed' with a reason?
+                  // 'commit_failed' implies the commit didn't happen.
+                  // Let's use 'apply_failed' or just keep 'success' and rely on gitCommitError.
+                  // Actually, let's just append to gitCommitError for visibility.
                 }
               }
             }

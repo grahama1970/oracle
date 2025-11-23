@@ -43,13 +43,35 @@ function buildCopilotModelSelectionExpression(targetModel: string): string {
   return `(() => {
     const TARGET = ${targetLiteral};
     const TARGET_LOWER = TARGET.toLowerCase();
-    const BUTTON_SELECTOR = 'button.ModelPicker-module__menuButton--w_ML2';
-    const BUTTON_LABEL_SELECTOR = '.ModelPicker-module__buttonName--Iid1H';
-    const OPTION_SELECTOR = 'li.prc-ActionList-ActionListItem-uq6I7';
-    const OPTION_LABEL_SELECTOR = '.prc-ActionList-ItemLabel-TmBhn > span';
+    
+    // Robust selectors for model picker
+    const BUTTON_SELECTORS = [
+      '[data-testid="model-switcher-dropdown-button"]',
+      'button[aria-label="Model picker"]',
+      'button[aria-label="Model"]',
+      'button:has(svg.octicon-sparkle)'
+    ];
+    
+    const OPTION_SELECTORS = [
+      '[role="menuitemradio"]',
+      '[role="menuitem"]',
+      'button[role="menuitem"]'
+    ];
 
-    const findModelButton = () => document.querySelector(BUTTON_SELECTOR);
-    const readCurrentLabel = (button) => button?.querySelector(BUTTON_LABEL_SELECTOR)?.textContent?.trim() ?? '';
+    const findModelButton = () => {
+      for (const sel of BUTTON_SELECTORS) {
+        const btn = document.querySelector(sel);
+        if (btn) return btn;
+      }
+      return null;
+    };
+
+    const readCurrentLabel = (button) => {
+      if (!button) return '';
+      // Try to find text within the button, ignoring screen reader text if possible
+      return button.textContent?.trim() ?? '';
+    };
+
     const closeDropdown = () => {
       const body = document.body;
       if (body && typeof body.click === 'function') {
@@ -63,7 +85,8 @@ function buildCopilotModelSelectionExpression(targetModel: string): string {
     }
 
     const currentLabel = readCurrentLabel(modelButton);
-    if (currentLabel && currentLabel.toLowerCase() === TARGET_LOWER) {
+    // Simple check: if current label contains target (e.g. "GPT-5"), assume it's selected
+    if (currentLabel && currentLabel.toLowerCase().includes(TARGET_LOWER)) {
       return { status: 'already-selected', label: currentLabel };
     }
 
@@ -75,11 +98,21 @@ function buildCopilotModelSelectionExpression(targetModel: string): string {
         const maxAttempts = 30;
         const poll = () => {
           attempts += 1;
-          const options = Array.from(document.querySelectorAll(OPTION_SELECTOR));
+          
+          // Find all potential options
+          let options = [];
+          for (const sel of OPTION_SELECTORS) {
+            const found = document.querySelectorAll(sel);
+            if (found.length > 0) {
+              options = Array.from(found);
+              break;
+            }
+          }
+
           if (options.length > 0) {
             for (const option of options) {
-              const label = option.querySelector(OPTION_LABEL_SELECTOR)?.textContent?.trim();
-              if (label && label.toLowerCase() === TARGET_LOWER) {
+              const label = option.textContent?.trim();
+              if (label && label.toLowerCase().includes(TARGET_LOWER)) {
                 option.click();
                 setTimeout(() => {
                   const updatedLabel = readCurrentLabel(findModelButton() || modelButton) || label;

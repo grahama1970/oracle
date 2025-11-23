@@ -39,15 +39,72 @@ export function getCurrentBranch(repoRoot: string): GitResult {
 }
 
 export function commitAll(message: string, repoRoot: string): GitResult {
-  const addResult = runGit(['add', '-A'], { cwd: repoRoot });
+  // First attempt
+  let addResult = runGit(['add', '-A'], { cwd: repoRoot });
   if (!addResult.ok) {
+    // Check for index lock
+    if (addResult.stderr && addResult.stderr.includes('Unable to create') && addResult.stderr.includes('.git/index.lock')) {
+      const lockMatch = addResult.stderr.match(/'(.+\.git\/index\.lock)'/);
+      if (lockMatch && lockMatch[1] && fs.existsSync(lockMatch[1])) {
+        try {
+          fs.unlinkSync(lockMatch[1]);
+          // Retry add
+          addResult = runGit(['add', '-A'], { cwd: repoRoot });
+        } catch (e) {
+          // Ignore unlink error, let it fail naturally
+        }
+      }
+    }
+
+    if (!addResult.ok) {
+      return {
+        ok: false,
+        stderr: addResult.stderr,
+        stdout: addResult.stdout,
+      };
+    }
+  }
+
+  // Check if there are staged changes
+  const diffResult = runGit(['diff', '--staged', '--quiet'], { cwd: repoRoot });
+  if (diffResult.ok) { // exit code 0 means no differences
     return {
       ok: false,
-      stderr: addResult.stderr,
-      stdout: addResult.stdout,
+      stderr: 'No staged changes to commit.',
     };
   }
-  return runGit(['commit', '-m', message], { cwd: repoRoot });
+
+  let commitResult = runGit(['commit', '-m', message], { cwd: repoRoot });
+
+  // Handle commit lock if it wasn't the add lock
+  if (!commitResult.ok && commitResult.stderr && commitResult.stderr.includes('.git/index.lock')) {
+    const lockMatch = commitResult.stderr.match(/'(.+\.git\/index\.lock)'/);
+    if (lockMatch && lockMatch[1] && fs.existsSync(lockMatch[1])) {
+      try {
+        fs.unlinkSync(lockMatch[1]);
+        // Retry commit
+        commitResult = runGit(['commit', '-m', message], { cwd: repoRoot });
+      } catch (e) {
+        // Ignore
+      }
+    }
+  }
+
+  return commitResult;
+}
+
+export function push(repoRoot: string, remote: string = 'origin', branch?: string): GitResult {
+  const args = ['push', remote];
+  if (branch) {
+    args.push(branch);
+  } else {
+    // If no branch specified, push the current branch
+    const current = getCurrentBranch(repoRoot);
+    if (current.ok && current.stdout) {
+      args.push(current.stdout.trim());
+    }
+  }
+  return runGit(args, { cwd: repoRoot });
 }
 
 export function getHeadSha(repoRoot: string): GitResult {

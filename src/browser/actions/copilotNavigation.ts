@@ -315,8 +315,7 @@ export async function readCopilotModelLabel(
     const { result } = await Runtime.evaluate({
       expression: `(() => {
         const selectors = [
-          // Primary: hashed class used by Copilot model chip
-          '.ModelPicker-module__buttonName--Iid1H',
+          // Primary: robust selectors from constants
           '${MODEL_BUTTON_SELECTOR}',
           '[data-testid*="model-switcher"]',
           'button[aria-label*="Model"]',
@@ -365,7 +364,6 @@ export async function extractCopilotResponse(
 
   // Direct DOM extraction of the latest assistant markdown (clipboard read is unreliable in automation).
   metrics.fallbackUsed = true;
-  logger('Using DOM extraction (latest assistant markdown only)');
 
   const { result } = await Runtime.evaluate({
     expression: `(() => {
@@ -388,7 +386,7 @@ export async function extractCopilotResponse(
       if (!container) return { error: 'no-container' };
 
       const allMsgs = Array.from(
-        container.querySelectorAll('.markdown-body[data-copilot-markdown="true"], .markdown-body, [data-message-role="assistant"]')
+        container.querySelectorAll('${COPILOT_MESSAGE_SELECTORS.join(', ')}, .markdown-body')
       );
       const messagesFound = allMsgs.length;
 
@@ -423,7 +421,7 @@ export async function extractCopilotResponse(
       });
 
       // Prefer explicit markdown body with copilot flag
-      const markdownBodies = clone.querySelectorAll('.markdown-body[data-copilot-markdown="true"], [data-copilot-markdown="true"], [data-testid="markdown-body"]');
+      const markdownBodies = clone.querySelectorAll('${COPILOT_MARKDOWN_SELECTORS.join(', ')}');
       const markdownBody = markdownBodies.length ? markdownBodies[markdownBodies.length - 1] : clone.querySelector('.markdown-body');
       const textContent = markdownBody ? markdownBody.textContent || '' : clone.textContent || '';
 
@@ -444,13 +442,6 @@ export async function extractCopilotResponse(
   const resultValue = result.value;
 
   if (resultValue.error) {
-    const errorMsg = resultValue.error === 'no-container'
-      ? 'No assistant container found'
-      : 'No messages found';
-    logger.warn(`DOM extraction failed: ${errorMsg}`);
-    if (options.selectorMetrics) {
-      logger('Extraction metrics:', metrics);
-    }
     return { text: '', html: null, metrics };
   }
 
@@ -460,16 +451,6 @@ export async function extractCopilotResponse(
   metrics.markdownBodiesFound = resultValue.markdownBodiesFound ?? 0;
 
   const cleaned = resultValue.text.trim();
-  logger('Extracted response via DOM fallback', {
-    length: cleaned.length,
-    extractedFrom: 'assistant container',
-    sidebarItemsRemoved: metrics.sidebarContentRemoved
-  });
-
-  if (options.selectorMetrics) {
-    logger('Extraction metrics:', metrics);
-  }
-
   return { text: cleaned, html: resultValue.html, metrics };
 }
 
@@ -542,6 +523,7 @@ export async function waitForCopilotResponse(
 
   let lastText = '';
   let lastHtml: string | null = null;
+  let last_debug_html: string | undefined;
   let firstValidContent = false;
 
   try {
@@ -557,7 +539,7 @@ export async function waitForCopilotResponse(
           if (!scope) return { status: 'no-scope', signals: {} };
 
           const allMsgs = Array.from(
-            scope.querySelectorAll('.markdown-body, [data-message-role="assistant"]'),
+            scope.querySelectorAll('${COPILOT_MESSAGE_SELECTORS.join(', ')}, .markdown-body'),
           );
           const latestMsg = allMsgs.length ? allMsgs[allMsgs.length - 1] : null;
 
@@ -570,6 +552,10 @@ export async function waitForCopilotResponse(
             clone.querySelectorAll('button, .sr-only, .copilot-sidebar, [role="navigation"], nav, header').forEach((el) => el.remove());
             text = (clone.innerText || '').trim();
             html = (latestMsg as HTMLElement).innerHTML;
+            console.log('--- INNER HTML ---');
+            console.log(html);
+            console.log('--- CLONE TEXT ---');
+            console.log(text);
           }
 
           // Check completion signals
@@ -614,6 +600,7 @@ export async function waitForCopilotResponse(
             status: 'ok',
             text,
             html,
+            debug_html: latestMsg ? (latestMsg as HTMLElement).innerHTML : 'no latestMsg',
             signals: {
               stopButtonGone: !hasStop,
               sendButtonEnabled,
@@ -643,6 +630,7 @@ export async function waitForCopilotResponse(
           lastMarkdownContent = state.text;
           lastText = state.text;
           lastHtml = state.html;
+          last_debug_html = state.debug_html;
         } else if (state.text.length > 0) {
           stableCycles++;
         }
@@ -669,6 +657,11 @@ export async function waitForCopilotResponse(
           logger(
             `[progress] ${(elapsed / 1000).toFixed(1)}s | stop=${signals.stopButtonGone} send=${signals.sendButtonEnabled} spin=${signals.spinnerGone} stable=${stableCycles}/${requiredStableCycles} chars=${state.text.length}`
           );
+          if (state.text.length > 0) {
+            logger(`[debug] Content preview: ${state.text.substring(0, 50).replace(/\n/g, ' ')}...`);
+          } else {
+            logger(`[debug] Content empty. HTML length: ${state.html?.length}`);
+          }
         }
 
         // Check if all signals indicate completion
@@ -686,6 +679,7 @@ export async function waitForCopilotResponse(
             signals,
             text: lastText,
             html: lastHtml,
+            debug_html: state.debug_html,
             elapsed: now - start
           };
         }
@@ -700,6 +694,7 @@ export async function waitForCopilotResponse(
             signals,
             text: lastText,
             html: lastHtml,
+            debug_html: state.debug_html,
             elapsed: now - start
           };
         }
@@ -718,6 +713,7 @@ export async function waitForCopilotResponse(
       signals,
       text: lastText,
       html: lastHtml,
+      debug_html: last_debug_html,
       elapsed: Date.now() - start
     };
 
@@ -732,7 +728,7 @@ export async function waitForCopilotResponse(
           delete (window as any).__copilotLastUpdate;
         })()`,
         returnByValue: true
-      }).catch(() => {});
+      }).catch(() => { });
       observerDisconnected = true;
     }
   }

@@ -245,90 +245,91 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
       );
     }
     // Platform-specific response waiting
-    let answer;
-    let copilotMetrics: any = {};
-    if (target === 'copilot') {
-      answer = await waitForCopilotResponse(Runtime, config.timeoutMs, logger, {
-        timeout: config.timeoutMs,
-        stabilityCheckInterval: 500,
-        requiredStableCycles: 3,
-      });
-      logger(`[browser] Copilot response complete via: ${answer.completionPath}`);
-      copilotMetrics = {
-        completionPath: answer.completionPath,
-        signals: answer.signals,
-        elapsedMs: answer.elapsed
-      };
-    } else {
-      answer = await waitForAssistantResponse(Runtime, config.timeoutMs, logger);
-    }
-
-    answerText = answer.text;
-    answerHtml = answer.html ?? '';
-
-    let patchSource: string | null = null;
-    let copiedMarkdown: string | null = null;
-    if (target === 'copilot') {
-      // Prefer clipboard-based extraction when available, then fall back to DOM snapshot text.
-      patchSource = await extractCopilotClipboardPatch({ Runtime, Browser }, logger);
-      if (!patchSource || patchSource.trim().length < 10) {
-        logger('[browser] Clipboard extraction empty; falling back to DOM snapshot text.');
-        patchSource = answerText || answerHtml || null;
-      } else {
-        logger('[browser] Using clipboard patch source for diff extraction.');
-      }
-      copiedMarkdown = patchSource ?? answerText ?? null;
-    } else {
-      copiedMarkdown = await withRetries(
-        async () => {
-          const attempt = await captureAssistantMarkdown(Runtime, answer.meta, logger);
-          if (!attempt) {
-            throw new Error('copy-missing');
+        let answer;
+        let copilotMetrics: any = {};
+        if (target === 'copilot') {
+          answer = await waitForCopilotResponse(Runtime, config.timeoutMs, logger, {
+            timeout: config.timeoutMs,
+            stabilityCheckInterval: 500,
+            requiredStableCycles: 3,
+          });
+          logger(`[browser] Copilot response complete via: ${answer.completionPath}`);
+          copilotMetrics = {
+            completionPath: answer.completionPath,
+            signals: answer.signals,
+            elapsedMs: answer.elapsed
+          };
+        } else {
+          answer = await waitForAssistantResponse(Runtime, config.timeoutMs, logger);
+        }
+    
+        answerText = answer.text;
+        answerHtml = answer.html ?? '';
+    
+        let patchSource: string | null = null;
+        let copiedMarkdown: string | null = null;
+        if (target === 'copilot') {
+          // Prefer clipboard-based extraction when available, then fall back to DOM snapshot text.
+          patchSource = await extractCopilotClipboardPatch({ Runtime, Browser }, logger);
+          if (!patchSource || patchSource.trim().length < 10) {
+            logger('[browser] Clipboard extraction empty; falling back to DOM snapshot text.');
+            patchSource = answerText || answerHtml || null;
+          } else {
+            logger('[browser] Using clipboard patch source for diff extraction.');
           }
-          return attempt;
-        },
-        {
-          retries: 2,
-          delayMs: 350,
-          onRetry: (attempt, error) => {
-            if (options.verbose) {
-              logger(
-                `[retry] Markdown capture attempt ${attempt + 1}: ${error instanceof Error ? error.message : error}`,
-              );
-            }
-          },
-        },
-      ).catch(() => null);
-    }
-    answerMarkdown = copiedMarkdown ?? answerText;
-    stopThinkingMonitor?.();
-    stopSnapshotMonitor?.();
-    runStatus = 'complete';
-    const durationMs = Date.now() - startedAt;
-    const answerChars = answerText.length;
-    const answerTokens = estimateTokenCount(answerMarkdown);
-
-    const result: BrowserRunResult = {
-      answerText,
-      answerMarkdown,
-      answerHtml: answerHtml.length > 0 ? answerHtml : undefined,
-      patchSource: patchSource ?? undefined,
-      tookMs: durationMs,
-      answerTokens,
-      answerChars,
-      chromePid: chrome.pid,
-      chromePort: chrome.port,
-      userDataDir,
-      snapshots: snapshotPaths.length > 0 ? snapshotPaths : undefined,
-      platform: target, // Add platform info to help debugging
-    };
-
-    // Add Copilot metrics if available
-    if (target === 'copilot' && copilotMetrics) {
-      (result as any).copilotMetrics = copilotMetrics;
-    }
-
-    return result;
+          copiedMarkdown = patchSource ?? answerText ?? null;
+        } else {
+          copiedMarkdown = await withRetries(
+            async () => {
+              const attempt = await captureAssistantMarkdown(Runtime, answer.meta, logger);
+              if (!attempt) {
+                throw new Error('copy-missing');
+              }
+              return attempt;
+            },
+            {
+              retries: 2,
+              delayMs: 350,
+              onRetry: (attempt, error) => {
+                if (options.verbose) {
+                  logger(
+                    `[retry] Markdown capture attempt ${attempt + 1}: ${
+                      error instanceof Error ? error.message : error
+                    }`,
+                  );
+                }
+              },
+            },
+          ).catch(() => null);
+        }
+        answerMarkdown = copiedMarkdown ?? answerText;
+        stopThinkingMonitor?.();
+        stopSnapshotMonitor?.();
+        runStatus = 'complete';
+        const durationMs = Date.now() - startedAt;
+        const answerChars = answerText.length;
+        const answerTokens = estimateTokenCount(answerMarkdown);
+    
+            const result: BrowserRunResult = {
+              answerText,
+              answerMarkdown,
+              answerHtml: answerHtml.length > 0 ? answerHtml : undefined,
+              patchSource: patchSource ?? undefined,
+              tookMs: durationMs,
+              answerTokens,
+              answerChars,
+              chromePid: chrome.pid,
+              chromePort: chrome.port,
+              userDataDir,
+              snapshots: snapshotPaths.length > 0 ? snapshotPaths : undefined,
+              platform: target, // Add platform info to help debugging
+            };    
+        // Add Copilot metrics if available
+        if (target === 'copilot' && copilotMetrics) {
+          (result as any).copilotMetrics = copilotMetrics;
+        }
+    
+        return result;
   } catch (error) {
     const normalizedError = error instanceof Error ? error : new Error(String(error));
     stopThinkingMonitor?.();
